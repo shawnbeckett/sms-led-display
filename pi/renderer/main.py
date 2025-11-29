@@ -170,14 +170,15 @@ def main():
             # Clear frame for new draw
             offscreen_canvas.Clear()
 
-            # --- STATIC PHONE NUMBER BOX (top-left, white, small font) -------
-            # Box outline
-            graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x1, box_y0, WHITE)  # top
-            graphics.DrawLine(offscreen_canvas, box_x0, box_y1, box_x1, box_y1, WHITE)  # bottom
-            graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x0, box_y1, WHITE)  # left
-            graphics.DrawLine(offscreen_canvas, box_x1, box_y0, box_x1, box_y1, WHITE)  # right
+            # --- STATIC PHONE NUMBER BOX (top-left, small font) -------------------------
 
-            # Phone text inside the box
+            # Draw box (1-pixel outline)
+            graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x1, box_y0, WHITE)
+            graphics.DrawLine(offscreen_canvas, box_x0, box_y1, box_x1, box_y1, WHITE)
+            graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x0, box_y1, WHITE)
+            graphics.DrawLine(offscreen_canvas, box_x1, box_y0, box_x1, box_y1, WHITE)
+
+            # Draw the phone number inside the box
             graphics.DrawText(
                 offscreen_canvas,
                 header_font,
