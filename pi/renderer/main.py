@@ -54,9 +54,9 @@ def load_font():
 
 
 def load_small_font():
-    """Load a smaller font for the static phone number box."""
+    """Load a very small, blocky font for the static phone number box."""
     font = graphics.Font()
-    font.LoadFont("/home/pi/rpi-rgb-led-matrix/fonts/5x7.bdf")
+    font.LoadFont("/home/pi/rpi-rgb-led-matrix/fonts/4x6.bdf")
     return font
 
 
@@ -98,29 +98,32 @@ def main():
     # Vertical position for scrolling text: baseline from bottom
     text_y = height - 5
 
-    # Static phone number text + layout (small region in upper-left)
-    phone_text = "647-308-4960"
-    phone_x = 2      # left padding inside box
-    phone_y = 7      # baseline for 5x7 font (top of panel is y=0)
+    # --- Static phone number box layout (small region in upper-left) ---------
+    # Use a two-line layout so the box stays compact
+    phone_line1 = "647-308"
+    phone_line2 = "4960"
 
-    # Precompute phone text width once using the header font
-    # Draw on the canvas temporarily just to compute width, then clear
+    phone_x = 2         # left padding
+    phone_y1 = 6        # baseline for first line (4x6 font)
+    phone_y2 = phone_y1 + 7   # second line: 6px font height + 1px spacing
+
+    # Precompute width for the box using line 1
     temp_width = graphics.DrawText(
         offscreen_canvas,
         header_font,
         phone_x,
-        phone_y,
+        phone_y1,
         WHITE,
-        phone_text,
+        phone_line1,
     )
-    phone_text_width = temp_width if temp_width is not None else 0
+    phone_text_width = temp_width if temp_width else 0
     offscreen_canvas.Clear()
 
-    # Compute static box bounds around the phone text
+    # Compute box bounds
     box_x0 = 0
     box_y0 = 0
     box_x1 = min(phone_x + phone_text_width + 2, width - 1)
-    box_y1 = 11  # a bit of vertical padding below the 5x7 text
+    box_y1 = phone_y2 + 2   # padding under second line
 
     # State for message + file reload
     current_message = None
@@ -170,23 +173,16 @@ def main():
             # Clear frame for new draw
             offscreen_canvas.Clear()
 
-            # --- STATIC PHONE NUMBER BOX (top-left, small font) -------------------------
-
-            # Draw box (1-pixel outline)
+            # --- STATIC PHONE NUMBER BOX (top-left, small 4x6 font) -----------------
+            # Box outline
             graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x1, box_y0, WHITE)
             graphics.DrawLine(offscreen_canvas, box_x0, box_y1, box_x1, box_y1, WHITE)
             graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x0, box_y1, WHITE)
             graphics.DrawLine(offscreen_canvas, box_x1, box_y0, box_x1, box_y1, WHITE)
 
-            # Draw the phone number inside the box
-            graphics.DrawText(
-                offscreen_canvas,
-                header_font,
-                phone_x,
-                phone_y,
-                WHITE,
-                phone_text,
-            )
+            # Phone number text (two lines)
+            graphics.DrawText(offscreen_canvas, header_font, phone_x, phone_y1, WHITE, phone_line1)
+            graphics.DrawText(offscreen_canvas, header_font, phone_x, phone_y2, WHITE, phone_line2)
 
             # --- SCROLLING MESSAGE (same behaviour as before) ----------------
             text_length = graphics.DrawText(
