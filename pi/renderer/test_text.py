@@ -27,7 +27,7 @@ def main():
 
     # --- Text to scroll
     text_color = graphics.Color(255, 255, 0)
-    message = "SMS LED DISPLAY"
+    message = "PENIS"
 
     offscreen_canvas = matrix.CreateFrameCanvas()
     pos = offscreen_canvas.width
