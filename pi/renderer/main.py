@@ -47,9 +47,16 @@ def create_matrix():
 
 
 def load_font():
-    """Load a bitmap font from the rpi-rgb-led-matrix fonts directory."""
+    """Load the main scrolling-text font."""
     font = graphics.Font()
     font.LoadFont("/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf")
+    return font
+
+
+def load_small_font():
+    """Load a smaller font for the static phone number box."""
+    font = graphics.Font()
+    font.LoadFont("/home/pi/rpi-rgb-led-matrix/fonts/5x7.bdf")
     return font
 
 
@@ -83,17 +90,37 @@ def main():
     matrix = create_matrix()
     offscreen_canvas = matrix.CreateFrameCanvas()
     font = load_font()
+    header_font = load_small_font()
 
     width = offscreen_canvas.width
     height = offscreen_canvas.height
 
-    # Vertical position: baseline from bottom, adjust if needed
+    # Vertical position for scrolling text: baseline from bottom
     text_y = height - 5
 
-    # Static phone number text + layout
+    # Static phone number text + layout (small region in upper-left)
     phone_text = "647-308-4960"
     phone_x = 2      # left padding inside box
-    phone_y = 11     # baseline for phone number (near top)
+    phone_y = 7      # baseline for 5x7 font (top of panel is y=0)
+
+    # Precompute phone text width once using the header font
+    # Draw on the canvas temporarily just to compute width, then clear
+    temp_width = graphics.DrawText(
+        offscreen_canvas,
+        header_font,
+        phone_x,
+        phone_y,
+        WHITE,
+        phone_text,
+    )
+    phone_text_width = temp_width if temp_width is not None else 0
+    offscreen_canvas.Clear()
+
+    # Compute static box bounds around the phone text
+    box_x0 = 0
+    box_y0 = 0
+    box_x1 = min(phone_x + phone_text_width + 2, width - 1)
+    box_y1 = 11  # a bit of vertical padding below the 5x7 text
 
     # State for message + file reload
     current_message = None
@@ -140,47 +167,27 @@ def main():
             color_index = (color_index + 1) % len(RAINBOW_COLORS)
             text_color = RAINBOW_COLORS[color_index]
 
-            # Clear frame
+            # Clear frame for new draw
             offscreen_canvas.Clear()
 
-            # --- STATIC PHONE NUMBER BOX (top-left, white) -------------------
-            # Draw the phone text first to get its pixel width
-            phone_text_width = graphics.DrawText(
-                offscreen_canvas,
-                font,
-                phone_x,
-                phone_y,
-                WHITE,
-                phone_text,
-            )
-
-            # Compute box coordinates with a bit of padding around text
-            box_x0 = 0
-            box_y0 = 0
-            box_x1 = phone_x + phone_text_width + 2   # right edge with padding
-            box_y1 = phone_y + 2                      # just below text
-
-            # Clamp box so it stays on a 64x32 panel
-            box_x1 = min(box_x1, width - 1)
-            box_y1 = min(box_y1, height - 1)
-
-            # Draw box outline
+            # --- STATIC PHONE NUMBER BOX (top-left, white, small font) -------
+            # Box outline
             graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x1, box_y0, WHITE)  # top
             graphics.DrawLine(offscreen_canvas, box_x0, box_y1, box_x1, box_y1, WHITE)  # bottom
             graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x0, box_y1, WHITE)  # left
             graphics.DrawLine(offscreen_canvas, box_x1, box_y0, box_x1, box_y1, WHITE)  # right
 
-            # Redraw phone text so it’s cleanly on top of the box
+            # Phone text inside the box
             graphics.DrawText(
                 offscreen_canvas,
-                font,
+                header_font,
                 phone_x,
                 phone_y,
                 WHITE,
                 phone_text,
             )
 
-            # --- SCROLLING MESSAGE (unchanged behaviour) --------------------
+            # --- SCROLLING MESSAGE (same behaviour as before) ----------------
             text_length = graphics.DrawText(
                 offscreen_canvas,
                 font,
