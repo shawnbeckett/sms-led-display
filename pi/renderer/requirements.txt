@@ -1,0 +1,9 @@
+# LED Display Renderer Dependencies
+# Add your Python package dependencies here
+
+# Example common dependencies for LED matrix projects:
+# rpi-ws281x==5.0.0  # For WS2812B LED strips
+# adafruit-circuitpython-neopixel  # Alternative for NeoPixels
+# RPi.GPIO  # For Raspberry Pi GPIO control
+# requests  # For HTTP requests
+# paho-mqtt  # For MQTT messaging
