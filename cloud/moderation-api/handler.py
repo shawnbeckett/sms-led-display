@@ -26,6 +26,18 @@ ALLOWED_SETTINGS_FIELDS = {
     "soft_banned_words",
 }
 
+# Message status values used in sms_led_messages
+STATUS_PENDING = "pending"
+STATUS_APPROVED = "approved"
+STATUS_REJECTED = "rejected"
+STATUS_CLEARED = "cleared"  # for future clear-screen behavior
+
+# The primary key used in the sms_led_messages DynamoDB table.
+# Twilio ingestion Lambda writes each incoming SMS using "pk" as the
+# partition key, normally storing the Twilio message SID (e.g., "SMxxxx").
+# This Lambda must use the same key name so UpdateItem/Query work correctly.
+MESSAGES_PARTITION_KEY = "pk"
+
 class DecimalEncoder(json.JSONEncoder):
     """
     Helper to JSON-encode DynamoDB Decimals (e.g. numeric attributes).
@@ -64,11 +76,14 @@ def lambda_handler(event, context):
       - REST API / proxy (v1): event["httpMethod"], event["path"]
       - HTTP API (v2): event["requestContext"]["http"]["method"], event["rawPath"]
 
-    Implemented routes (for now):
+    Implemented routes:
       - GET /messages/pending
       - GET /settings
+      - POST /settings
+      - POST /messages/approve
+      - POST /messages/reject
     """
-    # Default values so we always have something to fall back to
+    # Default values
     http_method = ""
     path = "/"
 
@@ -82,15 +97,13 @@ def lambda_handler(event, context):
         rc = event["requestContext"]
         http_info = rc.get("http") or {}
         http_method = (http_info.get("method") or "").upper()
-        # HTTP API v2 uses rawPath; fall back to path if needed
         path = event.get("rawPath") or event.get("path") or "/"
 
     else:
-        # Unknown event shape (unlikely unless misconfigured trigger)
         print("Unknown event shape:", event)
         return _response(400, {"error": "Bad request"})
 
-    # Basic CORS preflight handling (OPTIONS)
+    # Basic CORS preflight handling
     if http_method == "OPTIONS":
         return _response(200, {"message": "OK"})
 
@@ -100,54 +113,47 @@ def lambda_handler(event, context):
     # --- Routing ---
     if http_method == "GET" and path.endswith("/messages/pending"):
         return handle_get_pending_messages()
+    
     elif http_method == "GET" and path.endswith("/settings"):
         return handle_get_settings()
+    
     elif http_method == "POST" and path.endswith("/settings"):
         return handle_post_settings(event)
-    # Fallback for unimplemented routes
-    return _response(404, {"error": "Not Found", "path": path, "method": http_method})
+    
+    elif http_method == "POST" and path.endswith("/messages/approve"):
+        return handle_post_message_approve(event)
+    
+    elif http_method == "POST" and path.endswith("/messages/reject"):
+        return handle_post_message_reject(event)
 
+    return _response(404, {"error": "Not Found", "path": path, "method": http_method})
 
 
 def handle_get_pending_messages():
     """
     Return all messages with status='pending'.
-
-    For MVP, this uses a Scan + FilterExpression.
-    Later we can switch to a GSI on `status` if needed.
     """
     try:
         response = MESSAGES_TABLE.scan(
             FilterExpression=Attr("status").eq("pending")
         )
         items = response.get("Items", [])
-
-        # Optional: sort by created_at if present (assumes ISO8601 string)
         items.sort(key=lambda x: x.get("created_at", ""))
-
         return _response(200, {"items": items})
     except Exception as e:
-        # Log to CloudWatch in Lambda by printing
         print("Error in handle_get_pending_messages:", repr(e))
         return _response(500, {"error": "Internal server error"})
 
 
 def handle_get_settings():
     """
-    Return the global moderation settings.
-
-    Looks up the item:
-      - config_id = "global"
-    in the sms_led_settings table.
+    Return the global moderation settings (config_id='global').
     """
     try:
-        resp = SETTINGS_TABLE.get_item(
-            Key={"config_id": "global"}
-        )
+        resp = SETTINGS_TABLE.get_item(Key={"config_id": "global"})
         item = resp.get("Item")
 
         if not item:
-            # If the settings row is missing, surface a clear 404-style error
             return _response(404, {"error": "Settings not found", "config_id": "global"})
 
         return _response(200, item)
@@ -158,22 +164,10 @@ def handle_get_settings():
 
 def handle_post_settings(event):
     """
-    Update the global moderation settings row (config_id='global').
-
-    Accepts a JSON body with any subset of:
-      - moderation_mode
-      - profanity_mode
-      - max_message_length
-      - hard_banned_words
-      - soft_banned_words
-
-    Only provided fields are updated (partial update).
-    Returns the full updated settings item.
+    Update the global moderation settings row.
     """
-    # --- Parse request body (JSON) ---
     raw_body = event.get("body") or ""
 
-    # Handle possible base64-encoding from API Gateway
     if event.get("isBase64Encoded"):
         try:
             raw_body = base64.b64decode(raw_body).decode("utf-8")
@@ -189,43 +183,30 @@ def handle_post_settings(event):
     if not isinstance(body, dict):
         return _response(400, {"error": "Body must be a JSON object"})
 
-    # --- Filter and validate field names ---
     update_fields = {}
     for key, value in body.items():
         if key not in ALLOWED_SETTINGS_FIELDS:
-            # Unknown field -> reject the request clearly
             return _response(400, {"error": f"Unknown field: {key}"})
         update_fields[key] = value
 
     if not update_fields:
         return _response(400, {"error": "No valid fields provided to update"})
 
-    # --- Basic type checks / normalization ---
     if "max_message_length" in update_fields:
         try:
             update_fields["max_message_length"] = int(update_fields["max_message_length"])
-        except (TypeError, ValueError):
+        except Exception:
             return _response(400, {"error": "max_message_length must be an integer"})
 
-    if "hard_banned_words" in update_fields:
-        if not isinstance(update_fields["hard_banned_words"], list):
-            return _response(400, {"error": "hard_banned_words must be a list of strings"})
+    if "hard_banned_words" in update_fields and not isinstance(update_fields["hard_banned_words"], list):
+        return _response(400, {"error": "hard_banned_words must be a list"})
 
-    if "soft_banned_words" in update_fields:
-        if not isinstance(update_fields["soft_banned_words"], list):
-            return _response(400, {"error": "soft_banned_words must be a list of strings"})
+    if "soft_banned_words" in update_fields and not isinstance(update_fields["soft_banned_words"], list):
+        return _response(400, {"error": "soft_banned_words must be a list"})
 
-    # --- Build DynamoDB UpdateExpression from provided fields ---
-    update_expr_parts = []
-    expr_attr_values = {}
+    update_expr = "SET " + ", ".join(f"{k} = :{k}" for k in update_fields)
+    expr_attr_values = {f":{k}": v for k, v in update_fields.items()}
 
-    for key, value in update_fields.items():
-        update_expr_parts.append(f"{key} = :{key}")
-        expr_attr_values[f":{key}"] = value
-
-    update_expr = "SET " + ", ".join(update_expr_parts)
-
-    # --- Perform the update on config_id='global' ---
     try:
         result = SETTINGS_TABLE.update_item(
             Key={"config_id": "global"},
@@ -233,8 +214,104 @@ def handle_post_settings(event):
             ExpressionAttributeValues=expr_attr_values,
             ReturnValues="ALL_NEW",
         )
-        updated_item = result.get("Attributes", {})
-        return _response(200, updated_item)
+        return _response(200, result.get("Attributes", {}))
     except Exception as e:
         print("Error in handle_post_settings:", repr(e))
         return _response(500, {"error": "Internal server error"})
+
+
+def handle_post_message_approve(event):
+    """
+    Approve a single message by ID.
+    """
+    raw_body = event.get("body") or ""
+
+    if event.get("isBase64Encoded"):
+        try:
+            raw_body = base64.b64decode(raw_body).decode("utf-8")
+        except Exception as e:
+            print("Error decoding base64 body in approve:", repr(e))
+            return _response(400, {"error": "Invalid base64-encoded body"})
+
+    try:
+        body = json.loads(raw_body)
+    except json.JSONDecodeError:
+        return _response(400, {"error": "Invalid JSON body"})
+
+    if not isinstance(body, dict):
+        return _response(400, {"error": "Body must be a JSON object"})
+
+    message_id = body.get("message_id")
+    if not message_id or not isinstance(message_id, str):
+        return _response(400, {"error": "message_id (string) is required"})
+
+    try:
+        result = MESSAGES_TABLE.update_item(
+            Key={MESSAGES_PARTITION_KEY: message_id},
+            UpdateExpression="SET #s = :approved",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":approved": STATUS_APPROVED},
+            ReturnValues="ALL_NEW",
+        )
+        updated_item = result.get("Attributes")
+
+        if not updated_item:
+            return _response(404, {"error": "Message not found", "message_id": message_id})
+
+        return _response(200, {"item": updated_item})
+    except Exception as e:
+        print("Error in handle_post_message_approve:", repr(e))
+        return _response(500, {"error": "Internal server error"})
+    
+def handle_post_message_reject(event):
+    """
+    Reject a single message by ID.
+
+    Request body (JSON):
+      { "message_id": "..." }
+
+    Sets status = "rejected" on the pk.
+    Returns the updated item.
+    """
+    # --- Parse body ---
+    raw_body = event.get("body") or ""
+
+    if event.get("isBase64Encoded"):
+        try:
+            raw_body = base64.b64decode(raw_body).decode("utf-8")
+        except Exception as e:
+            print("Error decoding base64 body in reject:", repr(e))
+            return _response(400, {"error": "Invalid base64-encoded body"})
+
+    try:
+        body = json.loads(raw_body)
+    except json.JSONDecodeError:
+        return _response(400, {"error": "Invalid JSON body"})
+
+    if not isinstance(body, dict):
+        return _response(400, {"error": "Body must be a JSON object"})
+
+    message_id = body.get("message_id")
+    if not message_id or not isinstance(message_id, str):
+        return _response(400, {"error": "message_id (string) is required"})
+
+    # --- Perform reject update ---
+    try:
+        result = MESSAGES_TABLE.update_item(
+            Key={MESSAGES_PARTITION_KEY: message_id},
+            UpdateExpression="SET #s = :rejected",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":rejected": STATUS_REJECTED},
+            ReturnValues="ALL_NEW",
+        )
+        updated_item = result.get("Attributes")
+
+        if not updated_item:
+            return _response(404, {"error": "Message not found", "message_id": message_id})
+
+        return _response(200, {"item": updated_item})
+
+    except Exception as e:
+        print("Error in handle_post_message_reject:", repr(e))
+        return _response(500, {"error": "Internal server error"})
+
