@@ -99,22 +99,19 @@ def main():
     text_y = height - 5
 
     # --- Static phone number box layout (small region in upper-left) ---------
-    # Use a two-line layout so the box stays compact
-    phone_line1 = "647-308"
-    phone_line2 = "4960"
+    phone_text = "647-308-4960"
 
     phone_x = 2
-    phone_y1 = 6       # baseline for tom-thumb (3×5)
-    phone_y2 = phone_y1 + 6   # 5px tall + 1 spacing
+    phone_y = 6       # baseline for tom-thumb (3×5)
 
-    # Precompute width for the box using line 1
+    # Precompute width for the box using the single line
     temp_width = graphics.DrawText(
         offscreen_canvas,
         header_font,
         phone_x,
-        phone_y1,
+        phone_y,
         WHITE,
-        phone_line1,
+        phone_text,
     )
     phone_text_width = temp_width if temp_width else 0
     offscreen_canvas.Clear()
@@ -123,7 +120,7 @@ def main():
     box_x0 = 0
     box_y0 = 0
     box_x1 = min(phone_x + phone_text_width + 2, width - 1)
-    box_y1 = phone_y2 + 2   # padding under second line
+    box_y1 = phone_y + 2   # small padding under the single line
 
     # State for message + file reload
     current_message = None
@@ -173,16 +170,15 @@ def main():
             # Clear frame for new draw
             offscreen_canvas.Clear()
 
-            # --- STATIC PHONE NUMBER BOX (top-left, small 4x6 font) -----------------
+            # --- STATIC PHONE NUMBER BOX (top-left, tom-thumb font) -----------------
             # Box outline
             graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x1, box_y0, WHITE)
             graphics.DrawLine(offscreen_canvas, box_x0, box_y1, box_x1, box_y1, WHITE)
             graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x0, box_y1, WHITE)
             graphics.DrawLine(offscreen_canvas, box_x1, box_y0, box_x1, box_y1, WHITE)
 
-            # Phone number text (two lines)
-            graphics.DrawText(offscreen_canvas, header_font, phone_x, phone_y1, WHITE, phone_line1)
-            graphics.DrawText(offscreen_canvas, header_font, phone_x, phone_y2, WHITE, phone_line2)
+            # Phone number text (single line)
+            graphics.DrawText(offscreen_canvas, header_font, phone_x, phone_y, WHITE, phone_text)
 
             # --- SCROLLING MESSAGE (same behaviour as before) ----------------
             text_length = graphics.DrawText(
