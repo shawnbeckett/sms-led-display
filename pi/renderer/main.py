@@ -54,9 +54,9 @@ def load_font():
 
 
 def load_small_font():
-    """Load a very small, blocky font for the static phone number box."""
+    """Load an ultra-compact digital-style font for the corner phone box."""
     font = graphics.Font()
-    font.LoadFont("/home/pi/rpi-rgb-led-matrix/fonts/4x6.bdf")
+    font.LoadFont("/home/pi/rpi-rgb-led-matrix/fonts/tom-thumb.bdf")
     return font
 
 
@@ -103,9 +103,9 @@ def main():
     phone_line1 = "647-308"
     phone_line2 = "4960"
 
-    phone_x = 2         # left padding
-    phone_y1 = 6        # baseline for first line (4x6 font)
-    phone_y2 = phone_y1 + 7   # second line: 6px font height + 1px spacing
+    phone_x = 2
+    phone_y1 = 6       # baseline for tom-thumb (3×5)
+    phone_y2 = phone_y1 + 6   # 5px tall + 1 spacing
 
     # Precompute width for the box using line 1
     temp_width = graphics.DrawText(
