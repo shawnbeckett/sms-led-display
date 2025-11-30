@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SMS LED Display — Moderator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="page-header">
+    <h1>SMS LED Display — Moderator</h1>
+  </header>
+
+  <main>
+    <!-- Pending Messages Section -->
+    <section id="pending-section" class="section">
+      <h2>Pending Messages</h2>
+      <p class="swipe-hint">
+        Swipe right to <strong>approve</strong>, swipe left to <strong>reject</strong>.
+        You can also use the buttons.
+      </p>
+      <div id="pending-list">
+        <!-- Filled dynamically by app.js / loadPendingMessages() -->
+      </div>
+    </section>
+
+    <!-- Settings Section -->
+    <section id="settings-section" class="section">
+      <h2>Moderation Settings</h2>
+
+      <form id="settings-form">
+        <div class="form-row">
+          <label for="moderation_mode">Moderation mode</label>
+          <select id="moderation_mode" name="moderation_mode">
+            <option value="AUTOMATIC">AUTOMATIC — messages are auto-approved/rejected</option>
+            <option value="MANUAL">MANUAL — all messages require moderator approval</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="profanity_mode">Profanity mode</label>
+          <select id="profanity_mode" name="profanity_mode">
+            <option value="EXPLICIT">EXPLICIT — soft profanity OK, hard-banned never allowed</option>
+            <option value="FAMILY">FAMILY — any profanity auto-rejected</option>
+            <option value="STARRED">STARRED — soft profanity censored, hard-banned never allowed</option>
+            <option value="ANARCHY">ANARCHY — anything goes</option>
+          </select>
+        </div>
+
+        <div class="form-row">
+          <label for="max_message_length">Max message length</label>
+          <input
+            type="number"
+            id="max_message_length"
+            name="max_message_length"
+            min="1"
+          />
+        </div>
+
+        <div class="form-row">
+          <label for="hard_banned_words">Hard banned words (comma-separated)</label>
+          <textarea
+            id="hard_banned_words"
+            name="hard_banned_words"
+            rows="2"
+            placeholder="e.g., word1, word2, another word"
+          ></textarea>
+        </div>
+
+        <div class="form-row">
+          <label for="soft_banned_words">Soft banned words (comma-separated)</label>
+          <textarea
+            id="soft_banned_words"
+            name="soft_banned_words"
+            rows="2"
+            placeholder="e.g., word3, word4, another word"
+          ></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button id="save-settings-btn" type="button">
+            Save settings
+          </button>
+        </div>
+      </form>
+    </section>
+  </main>
+
+  <!-- Main JS, loaded after DOM so getElementById works -->
+  <script src="app.js"></script>
+</body>
+</html>

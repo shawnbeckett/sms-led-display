@@ -1,0 +1,130 @@
+body {
+    background: #111;
+    color: #eee;
+    font-family: system-ui, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+#container {
+    width: 95%;
+    max-width: 600px;
+    margin: auto;
+    padding-bottom: 100px;
+}
+
+h1, h2 {
+    text-align: center;
+}
+
+#pending-list .message-item {
+    background: #1c1c1c;
+    border: 1px solid #333;
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+}
+
+.message-item p {
+    margin: 6px 0;
+}
+
+.meta {
+    font-size: 0.85em;
+    opacity: 0.6;
+}
+
+button {
+    width: 48%;
+    padding: 10px;
+    margin-top: 8px;
+    border: none;
+    border-radius: 6px;
+    font-size: 1.1em;
+    cursor: pointer;
+}
+
+.approve-btn {
+    background: #0f0;
+    color: #000;
+}
+
+.reject-btn {
+    background: #f33;
+    color: #000;
+}
+
+#settings-section {
+    margin-top: 40px;
+}
+
+#settings-section input,
+#settings-section select {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 14px;
+    border-radius: 6px;
+    border: 1px solid #444;
+    background: #222;
+    color: #eee;
+}
+
+#save-settings-btn {
+    background: #2196F3;
+    width: 100%;
+    color: #fff;
+}
+
+.empty {
+    color: #777;
+    text-align: center;
+    padding: 20px;
+}
+.timestamp {
+    color: #888;
+    font-size: 0.85em;
+    margin-bottom: 6px;
+}
+
+/* --- Status badge + message header --- */
+
+.msg-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.status-badge {
+  font-size: 12px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* individual status colours for future reuse */
+.status-pending {
+  background-color: #444c;
+  color: #ffeb3b;
+}
+
+.status-approved {
+  background-color: #1b5e20;
+  color: #c8e6c9;
+}
+
+.status-rejected {
+  background-color: #b71c1c;
+  color: #ffcdd2;
+}
+
+/* Optional: keep action buttons on one line */
+.actions-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
