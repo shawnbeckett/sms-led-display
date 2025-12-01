@@ -27,7 +27,7 @@ def main():
 
     # --- Text to scroll
     text_color = graphics.Color(255, 255, 0)
-    message = "SHAWN'S SMS LED DISPLAY"
+    message = "SHAWN <3s KATIE"
 
     offscreen_canvas = matrix.CreateFrameCanvas()
     pos = offscreen_canvas.width

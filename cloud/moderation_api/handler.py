@@ -12,6 +12,11 @@ SCROLL_BEHAVIORS = ("LOOP", "ONCE")
 PROFANITY_MODES = ("EXPLICIT", "FAMILY", "STARRED", "ANARCHY")
 MODERATION_MODES = ("MANUAL", "AUTOMATIC")
 
+# Defaults for display-related settings
+DEFAULT_SCREEN_MUTED = False          # When true, Pi should treat the screen as muted
+DEFAULT_DISPLAY_MODE = "NORMAL"       # Must be one of DISPLAY_MODES
+DEFAULT_SCROLL_BEHAVIOR = "LOOP"      # Must be one of SCROLL_BEHAVIORS
+
 # --- DynamoDB setup ---
 DDB = boto3.resource("dynamodb")
 
@@ -30,6 +35,9 @@ ALLOWED_SETTINGS_FIELDS = {
     "max_message_length",
     "hard_banned_words",
     "soft_banned_words",
+    "screen_muted",
+    "display_mode",
+    "scroll_behavior",
 }
 
 # Message status values used in sms_led_messages
@@ -166,7 +174,17 @@ def handle_get_pending_messages():
 
 def handle_get_settings():
     """
-    Return the global moderation settings (config_id='global').
+    Return the global moderation/settings config (config_id='global').
+
+    Always includes:
+      - moderation_mode
+      - profanity_mode
+      - max_message_length
+      - hard_banned_words
+      - soft_banned_words
+      - screen_muted        (default: False)
+      - display_mode        (default: "NORMAL")
+      - scroll_behavior     (default: "LOOP")
     """
     try:
         resp = SETTINGS_TABLE.get_item(Key={"config_id": "global"})
@@ -175,7 +193,20 @@ def handle_get_settings():
         if not item:
             return _response(404, {"error": "Settings not found", "config_id": "global"})
 
-        return _response(200, item)
+        # Clone item so we can safely mutate it
+        settings = dict(item)
+
+        # Inject defaults for new display-related fields if missing
+        if "screen_muted" not in settings:
+            settings["screen_muted"] = DEFAULT_SCREEN_MUTED
+
+        if "display_mode" not in settings:
+            settings["display_mode"] = DEFAULT_DISPLAY_MODE
+
+        if "scroll_behavior" not in settings:
+            settings["scroll_behavior"] = DEFAULT_SCROLL_BEHAVIOR
+
+        return _response(200, settings)
     except Exception as e:
         print("Error in handle_get_settings:", repr(e))
         return _response(500, {"error": "Internal server error"})
