@@ -39,6 +39,7 @@ def load_settings():
     data.setdefault("ticker_text", data.get("fallback_message", "TXT 647-930-4995"))
     data.setdefault("ticker_font_path", "/home/pi/rpi-rgb-led-matrix/fonts/tom-thumb.bdf")
     data.setdefault("ticker_scroll_delay_sec", 0.07)
+    data.setdefault("ticker_gap_px", 10)
 
     return data
 
@@ -122,12 +123,18 @@ def draw_and_step_ticker(canvas, settings, ticker_state, ticker_font, ticker_col
         width = graphics.DrawText(canvas, ticker_font, 0, 0, ticker_color, ticker_text) or 0
         ticker_state["width"] = width
 
-    # Wrap sooner so ticker re-enters before it fully disappears off the left edge
-    if ticker_state["pos_x"] + width < canvas.width:
-        ticker_state["pos_x"] = canvas.width
+    gap = settings.get("ticker_gap_px", 10)
+
+    # Wrap when the first instance is fully off screen
+    if ticker_state["pos_x"] + width < 0:
+        ticker_state["pos_x"] += width + gap
 
     text_y = canvas.height - 1  # bottom row baseline for the tiny font
-    graphics.DrawText(canvas, ticker_font, ticker_state["pos_x"], text_y, ticker_color, ticker_text)
+    x1 = ticker_state["pos_x"]
+    x2 = x1 + width + gap
+
+    graphics.DrawText(canvas, ticker_font, x1, text_y, ticker_color, ticker_text)
+    graphics.DrawText(canvas, ticker_font, x2, text_y, ticker_color, ticker_text)
 
 
 def scroll_text(matrix, text, settings, fonts, ticker_state):
