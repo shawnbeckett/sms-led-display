@@ -122,7 +122,8 @@ def draw_and_step_ticker(canvas, settings, ticker_state, ticker_font, ticker_col
         width = graphics.DrawText(canvas, ticker_font, 0, 0, ticker_color, ticker_text) or 0
         ticker_state["width"] = width
 
-    if ticker_state["pos_x"] + width < 0:
+    # Wrap sooner so ticker re-enters before it fully disappears off the left edge
+    if ticker_state["pos_x"] + width < canvas.width:
         ticker_state["pos_x"] = canvas.width
 
     text_y = canvas.height - 1  # bottom row baseline for the tiny font
