@@ -1,209 +1,185 @@
 #!/usr/bin/env python3
-import os
+import json
 import time
 from pathlib import Path
 
+import requests
 from rgbmatrix import RGBMatrix, RGBMatrixOptions, graphics
 
-
-# --- Configuration -----------------------------------------------------------
-
-# Path to the message file (lives alongside this script in pi/renderer/)
-MESSAGE_FILE = Path(__file__).parent / "message.txt"
-
-# How often (in seconds) to check for updates to message.txt
-RELOAD_INTERVAL_SEC = 1.0
-
-# Delay between scroll steps (smaller = faster scroll)
-SCROLL_DELAY_SEC = 0.03
-
-# Simple rainbow palette to cycle through over time
-RAINBOW_COLORS = [
-    graphics.Color(255, 0, 0),      # red
-    graphics.Color(255, 127, 0),    # orange
-    graphics.Color(255, 255, 0),    # yellow
-    graphics.Color(0, 255, 0),      # green
-    graphics.Color(0, 0, 255),      # blue
-    graphics.Color(75, 0, 130),     # indigo
-    graphics.Color(148, 0, 211),    # violet
-]
-
-WHITE = graphics.Color(255, 255, 255)
+# Paths
+BASE_DIR = Path(__file__).parent
+SETTINGS_FILE = BASE_DIR / "settings.json"
 
 
-def create_matrix():
-    """Initialize and return the RGBMatrix with options tuned to your panel/HAT."""
+# ---------------------------------------------------------------------------
+# Settings + Matrix setup
+# ---------------------------------------------------------------------------
+
+def load_settings():
+    """
+    Load renderer settings from settings.json.
+    """
+    with open(SETTINGS_FILE, "r") as f:
+        data = json.load(f)
+
+    # Basic defaults / safety
+    data.setdefault("api_base_url", "")
+    data.setdefault("live_messages_path", "/messages/live")
+    data.setdefault("poll_interval_sec", 5)
+    data.setdefault("scroll_delay_sec", 0.03)
+    data.setdefault("panel_rows", 32)
+    data.setdefault("panel_cols", 64)
+    data.setdefault("chain_length", 1)
+    data.setdefault("parallel", 1)
+    data.setdefault("hardware_mapping", "adafruit-hat")
+    data.setdefault("brightness", 70)
+    data.setdefault("font_path", "/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf")
+    data.setdefault("fallback_message", "TXT 647-930-4995")
+    data.setdefault("fallback_idle_seconds", 5)
+
+    return data
+
+
+def create_matrix(settings):
+    """
+    Create and configure the RGBMatrix from settings.
+    """
     options = RGBMatrixOptions()
-    options.rows = 32
-    options.cols = 64
-    options.chain_length = 1
-    options.parallel = 1
-    options.hardware_mapping = "adafruit-hat"
-    options.brightness = 70
-    options.pwm_bits = 11
+    options.rows = settings["panel_rows"]
+    options.cols = settings["panel_cols"]
+    options.chain_length = settings["chain_length"]
+    options.parallel = settings["parallel"]
+    options.hardware_mapping = settings["hardware_mapping"]
+    options.brightness = settings["brightness"]
     options.drop_privileges = False
 
-    return RGBMatrix(options=options)
+    matrix = RGBMatrix(options=options)
+    return matrix
 
 
-def load_font():
-    """Load the main scrolling-text font."""
-    font = graphics.Font()
-    font.LoadFont("/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf")
-    return font
-
-
-def load_small_font():
-    """Load an ultra-compact digital-style font for the corner phone box."""
-    font = graphics.Font()
-    font.LoadFont("/home/pi/rpi-rgb-led-matrix/fonts/tom-thumb.bdf")
-    return font
-
-
-def read_message_from_file():
+def build_live_messages_url(settings):
     """
-    Read and normalize the message from MESSAGE_FILE.
+    Construct the full /messages/live URL from base + path.
+    """
+    base = (settings.get("api_base_url") or "").rstrip("/")
+    path = settings.get("live_messages_path", "/messages/live")
+    if not path.startswith("/"):
+        path = "/" + path
+    url = base + path
+    return url
 
-    Returns:
-        str | None:
-            - str with the message if there is non-whitespace content
-            - None if file is missing, unreadable, or only whitespace
+
+# ---------------------------------------------------------------------------
+# Backend polling
+# ---------------------------------------------------------------------------
+
+def fetch_live_messages(settings, url):
+    """
+    Call the moderation API /messages/live endpoint and return a list of messages.
+
+    Expects response shape:
+        { "messages": [ { "body": "text", ... }, ... ] }
     """
     try:
-        raw = MESSAGE_FILE.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return None
-    except OSError:
-        # Any other read error: treat as "no message"
-        return None
+        print(f"[Pi] Fetching live messages from: {url}")
+        resp = requests.get(url, timeout=3)
+        resp.raise_for_status()
+        data = resp.json()
 
-    msg = raw.strip()
-    if not msg:
-        return None
+        messages = data.get("messages") or data.get("items") or []
+        print(f"[Pi] Fetched {len(messages)} live message(s)")
+        return messages
 
-    # For now, keep it single-line; ignore newlines if present
-    # (you can extend to multi-line later)
-    return " ".join(msg.splitlines())
+    except Exception as e:
+        print(f"[Pi] Error fetching live messages: {e}")
+        return []
 
 
-def main():
-    matrix = create_matrix()
+# ---------------------------------------------------------------------------
+# Rendering / scrolling
+# ---------------------------------------------------------------------------
+
+def scroll_text(matrix, text, settings):
+    """
+    Scroll a single line of text from right to left on the matrix.
+    """
+    if not text:
+        return
+
+    scroll_delay = settings.get("scroll_delay_sec", 0.03)
+    font_path = settings.get("font_path", "/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf")
+
+    font = graphics.Font()
+    font.LoadFont(font_path)
+
+    # Yellow text
+    color = graphics.Color(255, 255, 0)
+
     offscreen_canvas = matrix.CreateFrameCanvas()
-    font = load_font()
-    header_font = load_small_font()
-
     width = offscreen_canvas.width
     height = offscreen_canvas.height
 
-    # Vertical position for scrolling text: baseline from bottom
-    text_y = height - 5
+    # Baseline for text (roughly vertically centered)
+    text_y = height // 2 + 4
 
-    # --- Static phone number box layout (small region in upper-left) ---------
-    phone_text = "647-308-4960"
+    # Measure text width
+    text_width = graphics.DrawText(offscreen_canvas, font, 0, text_y, color, text)
 
-    phone_x = 2
-    phone_y = 6       # baseline for tom-thumb (3×5)
-
-    # Precompute width for the box using the single line
-    temp_width = graphics.DrawText(
-        offscreen_canvas,
-        header_font,
-        phone_x,
-        phone_y,
-        WHITE,
-        phone_text,
-    )
-    phone_text_width = temp_width if temp_width else 0
-    offscreen_canvas.Clear()
-
-    # Compute box bounds
-    box_x0 = 0
-    box_y0 = 0
-    box_x1 = min(phone_x + phone_text_width + 2, width - 1)
-    box_y1 = phone_y + 2   # small padding under the single line
-
-    # State for message + file reload
-    current_message = None
-    last_mtime = None
-    last_reload_time = 0.0
-
-    # Scroll position
+    # Start from the right edge
     pos_x = width
 
-    # Color cycling state
-    color_index = 0
+    print(f"[Pi] Scrolling text: '{text}'")
 
-    try:
-        while True:
-            now = time.time()
+    while pos_x + text_width > 0:
+        offscreen_canvas.Clear()
+        graphics.DrawText(offscreen_canvas, font, pos_x, text_y, color, text)
+        pos_x -= 1
+        time.sleep(scroll_delay)
+        offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
 
-            # --- Periodically reload message.txt -----------------------------
-            if now - last_reload_time >= RELOAD_INTERVAL_SEC:
-                last_reload_time = now
 
-                try:
-                    mtime = os.path.getmtime(MESSAGE_FILE)
-                except OSError:
-                    mtime = None
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
 
-                # Only re-read if file changed or if we never had a message
-                if mtime != last_mtime:
-                    last_mtime = mtime
-                    new_message = read_message_from_file()
+def run():
+    settings = load_settings()
+    matrix = create_matrix(settings)
 
-                    # If message changed (including to/from None), reset scroll
-                    if new_message != current_message:
-                        current_message = new_message
-                        pos_x = width  # restart from right edge
+    poll_interval = settings.get("poll_interval_sec", 5)
+    fallback_message = settings.get("fallback_message", "TXT 647-930-4995")
+    fallback_idle = settings.get("fallback_idle_seconds", 5)
 
-            # --- Drawing / scrolling logic -----------------------------------
-            if current_message is None:
-                # Empty or missing file: clear the panel and idle
-                matrix.Clear()
-                time.sleep(0.1)
-                continue
+    live_url = build_live_messages_url(settings)
+    print("[Pi] Loaded settings from:", SETTINGS_FILE)
+    print("[Pi] Using live messages URL:", live_url)
+    print("[Pi] Poll interval (sec):", poll_interval)
 
-            # Advance rainbow color each frame
-            color_index = (color_index + 1) % len(RAINBOW_COLORS)
-            text_color = RAINBOW_COLORS[color_index]
+    last_fetch_ts = 0
+    cached_messages = []
 
-            # Clear frame for new draw
-            offscreen_canvas.Clear()
+    while True:
+        now = time.time()
 
-            # --- STATIC PHONE NUMBER BOX (top-left, tom-thumb font) -----------------
-            # Box outline
-            graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x1, box_y0, WHITE)
-            graphics.DrawLine(offscreen_canvas, box_x0, box_y1, box_x1, box_y1, WHITE)
-            graphics.DrawLine(offscreen_canvas, box_x0, box_y0, box_x0, box_y1, WHITE)
-            graphics.DrawLine(offscreen_canvas, box_x1, box_y0, box_x1, box_y1, WHITE)
+        # Refresh messages from backend based on poll interval
+        if now - last_fetch_ts >= poll_interval:
+            cached_messages = fetch_live_messages(settings, live_url)
+            last_fetch_ts = now
 
-            # Phone number text (single line)
-            graphics.DrawText(offscreen_canvas, header_font, phone_x, phone_y, WHITE, phone_text)
-
-            # --- SCROLLING MESSAGE (same behaviour as before) ----------------
-            text_length = graphics.DrawText(
-                offscreen_canvas,
-                font,
-                pos_x,
-                text_y,
-                text_color,
-                current_message,
-            )
-
-            # Move left by one pixel
-            pos_x -= 1
-
-            # If text has fully scrolled off to the left, reset to right edge
-            if pos_x + text_length < 0:
-                pos_x = width
-
-            offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
-            time.sleep(SCROLL_DELAY_SEC)
-
-    except KeyboardInterrupt:
-        # Graceful exit: clear the display
-        matrix.Clear()
+        if cached_messages:
+            # Scroll each approved message body in order
+            for msg in list(cached_messages):
+                body = str(msg.get("body", "")).strip()
+                if body:
+                    scroll_text(matrix, body, settings)
+        else:
+            # No live messages -> show fallback prompt once, then idle briefly
+            scroll_text(matrix, fallback_message, settings)
+            time.sleep(fallback_idle)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        run()
+    except KeyboardInterrupt:
+        print("\n[Pi] Exiting on Ctrl+C")
