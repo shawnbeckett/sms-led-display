@@ -36,6 +36,9 @@ def load_settings():
     data.setdefault("font_path", "/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf")
     data.setdefault("fallback_message", "TXT 647-930-4995")
     data.setdefault("fallback_idle_seconds", 5)
+    data.setdefault("ticker_text", data.get("fallback_message", "TXT 647-930-4995"))
+    data.setdefault("ticker_font_path", "/home/pi/rpi-rgb-led-matrix/fonts/tom-thumb.bdf")
+    data.setdefault("ticker_scroll_delay_sec", 0.07)
 
     return data
 
@@ -99,21 +102,44 @@ def fetch_live_messages(settings, url):
 # Rendering / scrolling
 # ---------------------------------------------------------------------------
 
-def scroll_text(matrix, text, settings):
+def draw_and_step_ticker(canvas, settings, ticker_state, ticker_font, ticker_color):
     """
-    Scroll a single line of text from right to left on the matrix.
+    Draw the small ticker text at the bottom of the display and advance it
+    at a slower rate than the main message scroll.
+    """
+    ticker_text = ticker_state.get("text", "")
+    if not ticker_text:
+        return
+
+    ticker_delay = settings.get("ticker_scroll_delay_sec", 0.07)
+    now = time.time()
+    if now - ticker_state.get("last_step", 0) >= ticker_delay:
+        ticker_state["pos_x"] = ticker_state.get("pos_x", canvas.width) - 1
+        ticker_state["last_step"] = now
+
+    width = ticker_state.get("width", 0)
+    if width <= 0:
+        width = graphics.DrawText(canvas, ticker_font, 0, 0, ticker_color, ticker_text) or 0
+        ticker_state["width"] = width
+
+    if ticker_state["pos_x"] + width < 0:
+        ticker_state["pos_x"] = canvas.width
+
+    text_y = canvas.height - 1  # bottom row baseline for the tiny font
+    graphics.DrawText(canvas, ticker_font, ticker_state["pos_x"], text_y, ticker_color, ticker_text)
+
+
+def scroll_text(matrix, text, settings, fonts, ticker_state):
+    """
+    Scroll a single line of text from right to left on the matrix while
+    keeping a tiny ticker moving along the bottom.
     """
     if not text:
         return
 
     scroll_delay = settings.get("scroll_delay_sec", 0.03)
-    font_path = settings.get("font_path", "/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf")
-
-    font = graphics.Font()
-    font.LoadFont(font_path)
-
-    # Yellow text
-    color = graphics.Color(255, 255, 0)
+    font = fonts["main_font"]
+    color = fonts["main_color"]
 
     offscreen_canvas = matrix.CreateFrameCanvas()
     width = offscreen_canvas.width
@@ -133,6 +159,13 @@ def scroll_text(matrix, text, settings):
     while pos_x + text_width > 0:
         offscreen_canvas.Clear()
         graphics.DrawText(offscreen_canvas, font, pos_x, text_y, color, text)
+        draw_and_step_ticker(
+            offscreen_canvas,
+            settings,
+            ticker_state,
+            fonts["ticker_font"],
+            fonts["ticker_color"],
+        )
         pos_x -= 1
         time.sleep(scroll_delay)
         offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
@@ -146,14 +179,47 @@ def run():
     settings = load_settings()
     matrix = create_matrix(settings)
 
+    # Load fonts once
+    main_font = graphics.Font()
+    main_font.LoadFont(settings.get("font_path", "/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf"))
+    ticker_font = graphics.Font()
+    ticker_font.LoadFont(settings.get("ticker_font_path", "/home/pi/rpi-rgb-led-matrix/fonts/tom-thumb.bdf"))
+
+    fonts = {
+        "main_font": main_font,
+        "main_color": graphics.Color(255, 255, 0),  # yellow
+        "ticker_font": ticker_font,
+        "ticker_color": graphics.Color(200, 200, 200),
+    }
+
     poll_interval = settings.get("poll_interval_sec", 5)
     fallback_message = settings.get("fallback_message", "TXT 647-930-4995")
     fallback_idle = settings.get("fallback_idle_seconds", 5)
+    ticker_text = settings.get("ticker_text", fallback_message)
 
     live_url = build_live_messages_url(settings)
     print("[Pi] Loaded settings from:", SETTINGS_FILE)
     print("[Pi] Using live messages URL:", live_url)
     print("[Pi] Poll interval (sec):", poll_interval)
+
+    # Ticker state: start from the right edge
+    temp_canvas = matrix.CreateFrameCanvas()
+    ticker_width = graphics.DrawText(
+        temp_canvas,
+        fonts["ticker_font"],
+        0,
+        temp_canvas.height - 1,
+        fonts["ticker_color"],
+        ticker_text,
+    ) or 0
+    temp_canvas.Clear()
+
+    ticker_state = {
+        "text": ticker_text,
+        "pos_x": temp_canvas.width,
+        "width": ticker_width,
+        "last_step": 0.0,
+    }
 
     last_fetch_ts = 0
     cached_messages = []
@@ -171,11 +237,24 @@ def run():
             for msg in list(cached_messages):
                 body = str(msg.get("body", "")).strip()
                 if body:
-                    scroll_text(matrix, body, settings)
+                    scroll_text(matrix, body, settings, fonts, ticker_state)
         else:
             # No live messages -> show fallback prompt once, then idle briefly
-            scroll_text(matrix, fallback_message, settings)
-            time.sleep(fallback_idle)
+            scroll_text(matrix, fallback_message, settings, fonts, ticker_state)
+            if fallback_idle > 0:
+                end_idle = time.time() + fallback_idle
+                while time.time() < end_idle:
+                    canvas = matrix.CreateFrameCanvas()
+                    canvas.Clear()
+                    draw_and_step_ticker(
+                        canvas,
+                        settings,
+                        ticker_state,
+                        fonts["ticker_font"],
+                        fonts["ticker_color"],
+                    )
+                    canvas = matrix.SwapOnVSync(canvas)
+                    time.sleep(settings.get("scroll_delay_sec", 0.03))
 
 
 if __name__ == "__main__":
