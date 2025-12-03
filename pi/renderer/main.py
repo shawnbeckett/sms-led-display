@@ -247,22 +247,20 @@ def run():
                 if body:
                     scroll_text(matrix, body, settings, fonts, ticker_state)
         else:
-            # No live messages -> show fallback prompt once, then idle briefly
-            scroll_text(matrix, fallback_message, settings, fonts, ticker_state)
-            if fallback_idle > 0:
-                end_idle = time.time() + fallback_idle
-                while time.time() < end_idle:
-                    canvas = matrix.CreateFrameCanvas()
-                    canvas.Clear()
-                    draw_and_step_ticker(
-                        canvas,
-                        settings,
-                        ticker_state,
-                        fonts["ticker_font"],
-                        fonts["ticker_color"],
-                    )
-                    canvas = matrix.SwapOnVSync(canvas)
-                    time.sleep(settings.get("scroll_delay_sec", 0.03))
+            # No live messages -> only show the small bottom ticker (no full-screen scroll)
+            end_idle = time.time() + fallback_idle if fallback_idle > 0 else now
+            while time.time() < end_idle:
+                canvas = matrix.CreateFrameCanvas()
+                canvas.Clear()
+                draw_and_step_ticker(
+                    canvas,
+                    settings,
+                    ticker_state,
+                    fonts["ticker_font"],
+                    fonts["ticker_color"],
+                )
+                canvas = matrix.SwapOnVSync(canvas)
+                time.sleep(settings.get("scroll_delay_sec", 0.03))
 
 
 if __name__ == "__main__":
