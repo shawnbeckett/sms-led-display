@@ -99,6 +99,27 @@ def fetch_live_messages(settings, url):
         return []
 
 
+def mark_message_played(settings, message_id):
+    """
+    Notify the backend that a message has been played so UI can start countdowns.
+    """
+    if not message_id:
+        return
+
+    base = (settings.get("api_base_url") or "").rstrip("/")
+    played_url = base + "/messages/played"
+    try:
+        resp = requests.post(
+            played_url,
+            json={"message_id": message_id},
+            timeout=3,
+        )
+        if resp.status_code != 200:
+            print(f"[Pi] mark_played failed {resp.status_code}: {resp.text}")
+    except Exception as e:
+        print(f"[Pi] Error marking played for {message_id}: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Rendering / scrolling
 # ---------------------------------------------------------------------------
@@ -231,6 +252,7 @@ def run():
 
     last_fetch_ts = 0
     cached_messages = []
+    played_cache = set()
 
     while True:
         now = time.time()
@@ -243,6 +265,10 @@ def run():
         if cached_messages:
             # Scroll each approved message body in order
             for msg in list(cached_messages):
+                msg_id = msg.get("pk") or msg.get("message_id")
+                if msg_id and msg_id not in played_cache:
+                    mark_message_played(settings, msg_id)
+                    played_cache.add(msg_id)
                 body = str(msg.get("body", "")).strip()
                 if body:
                     scroll_text(matrix, body, settings, fonts, ticker_state)
