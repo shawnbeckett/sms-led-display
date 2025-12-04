@@ -82,7 +82,7 @@ def fetch_live_messages(settings, url):
     Call the moderation API /messages/live endpoint and return a list of messages.
 
     Expects response shape:
-        { "messages": [ { "body": "text", ... }, ... ] }
+        { "messages": [ { "body": "text", ... }, ... ], "screen_muted": bool }
     """
     try:
         print(f"[Pi] Fetching live messages from: {url}")
@@ -91,12 +91,19 @@ def fetch_live_messages(settings, url):
         data = resp.json()
 
         messages = data.get("messages") or data.get("items") or []
-        print(f"[Pi] Fetched {len(messages)} live message(s)")
-        return messages
+        screen_muted = bool(data.get("screen_muted", False))
+        print(
+            f"[Pi] Fetched {len(messages)} live message(s); mute is "
+            f"{'ON' if screen_muted else 'OFF'}"
+        )
+        return {
+            "messages": messages,
+            "screen_muted": screen_muted,
+        }
 
     except Exception as e:
         print(f"[Pi] Error fetching live messages: {e}")
-        return []
+        return {"messages": [], "screen_muted": False}
 
 
 def mark_message_played(settings, message_id):
@@ -252,6 +259,7 @@ def run():
 
     last_fetch_ts = 0
     cached_messages = []
+    screen_muted = False
     played_cache = set()
 
     while True:
@@ -259,8 +267,18 @@ def run():
 
         # Refresh messages from backend based on poll interval
         if now - last_fetch_ts >= poll_interval:
-            cached_messages = fetch_live_messages(settings, live_url)
+            live_data = fetch_live_messages(settings, live_url)
+            cached_messages = live_data.get("messages", [])
+            screen_muted = live_data.get("screen_muted", False)
             last_fetch_ts = now
+
+        if screen_muted:
+            # Force a full blank frame (no ticker, no messages)
+            canvas = matrix.CreateFrameCanvas()
+            canvas.Clear()
+            canvas = matrix.SwapOnVSync(canvas)
+            time.sleep(0.2)
+            continue
 
         if cached_messages:
             # Scroll each approved message body in order

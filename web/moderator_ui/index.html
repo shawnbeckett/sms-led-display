@@ -3,8 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <title>SMS LED Display — Moderator</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="style.css" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+  />
+  <!-- Ensure screens toggle even if cached CSS is stale -->
+  <style>
+    .screen { display: none; }
+    .screen.screen-active { display: block; }
+    .screen.screen-hidden { display: none; }
+  </style>
+  <link rel="stylesheet" href="style.css?v=5" />
 </head>
 <body>
   <header class="page-header">
@@ -12,81 +21,139 @@
   </header>
 
   <main>
-    <!-- Pending Messages Section -->
-    <section id="pending-section" class="section">
-      <h2>Pending Messages</h2>
-      <p class="swipe-hint">
-        Swipe right to <strong>approve</strong>, swipe left to <strong>reject</strong>.
-        You can also use the buttons.
-      </p>
-      <div id="pending-list">
-        <!-- Filled dynamically by app.js / loadPendingMessages() -->
-      </div>
+    <!-- ============================
+         MESSAGES SCREEN (DEFAULT)
+         ============================ -->
+    <section id="messages-screen" class="screen screen-active">
+      <section id="pending-section" class="section">
+        <div class="section-header">
+          <h2>Pending Messages</h2>
+        </div>
+
+        <div id="pending-list">
+          <!-- Filled dynamically by app.js / loadPendingMessages() -->
+        </div>
+      </section>
+
+      <section id="approved-section" class="section">
+        <h2>Live Messages (Approved)</h2>
+        <div id="approved-list"></div>
+      </section>
+
+      <section class="section">
+        <button id="open-settings-btn" type="button" class="secondary-btn">
+          Settings
+        </button>
+      </section>
+
+      <section class="section mute-section">
+        <div class="form-row toggle-row subtle-toggle">
+          <div class="toggle-copy">
+            <label for="screen_muted">Mute display</label>
+            <p class="help-text">Blanks the LED until turned off; queue still runs.</p>
+          </div>
+          <label class="switch" aria-label="Mute display">
+            <input type="checkbox" id="screen_muted" name="screen_muted" />
+            <span class="slider round"></span>
+          </label>
+        </div>
+      </section>
     </section>
 
-    <!-- Settings Section -->
-    <section id="settings-section" class="section">
-      <h2>Moderation Settings</h2>
+    <!-- ============================
+         SETTINGS SCREEN
+         ============================ -->
+    <section id="settings-screen" class="screen screen-hidden">
+      <div class="section settings-header">
+        <button id="back-to-messages-btn" type="button" class="secondary-btn">
+          ← Back to messages
+        </button>
+        <h2>Moderation Settings</h2>
+      </div>
 
-      <form id="settings-form">
-        <div class="form-row">
-          <label for="moderation_mode">Moderation mode</label>
-          <select id="moderation_mode" name="moderation_mode">
-            <option value="AUTOMATIC">AUTOMATIC — messages are auto-approved/rejected</option>
-            <option value="MANUAL">MANUAL — all messages require moderator approval</option>
-          </select>
-        </div>
+      <section id="settings-section" class="section">
+        <form id="settings-form">
+          <!-- Moderation mode -->
+          <div class="form-row">
+            <label for="moderation_mode">Moderation mode</label>
+            <select id="moderation_mode" name="moderation_mode">
+              <option value="AUTOMATIC">AUTOMATIC — messages are auto-approved/rejected</option>
+              <option value="MANUAL">MANUAL — all messages require moderator approval</option>
+            </select>
+          </div>
 
-        <div class="form-row">
-          <label for="profanity_mode">Profanity mode</label>
-          <select id="profanity_mode" name="profanity_mode">
-            <option value="EXPLICIT">EXPLICIT — soft profanity OK, hard-banned never allowed</option>
-            <option value="FAMILY">FAMILY — any profanity auto-rejected</option>
-            <option value="STARRED">STARRED — soft profanity censored, hard-banned never allowed</option>
-            <option value="ANARCHY">ANARCHY — anything goes</option>
-          </select>
-        </div>
+          <!-- Profanity mode -->
+          <div class="form-row">
+            <label for="profanity_mode">Profanity mode</label>
+            <select id="profanity_mode" name="profanity_mode">
+              <option value="EXPLICIT">EXPLICIT — soft profanity OK, hard-banned never allowed</option>
+              <option value="FAMILY">FAMILY — any profanity auto-rejected</option>
+              <option value="STARRED">STARRED — soft profanity censored, hard-banned never allowed</option>
+              <option value="ANARCHY">ANARCHY — anything goes</option>
+            </select>
+          </div>
 
-        <div class="form-row">
-          <label for="max_message_length">Max message length</label>
-          <input
-            type="number"
-            id="max_message_length"
-            name="max_message_length"
-            min="1"
-          />
-        </div>
+          <!-- Max message length -->
+          <div class="form-row">
+            <label for="max_message_length">Max message length</label>
+            <input
+              type="number"
+              id="max_message_length"
+              name="max_message_length"
+              min="1"
+            />
+          </div>
 
-        <div class="form-row">
-          <label for="hard_banned_words">Hard banned words (comma-separated)</label>
-          <textarea
-            id="hard_banned_words"
-            name="hard_banned_words"
-            rows="2"
-            placeholder="e.g., word1, word2, another word"
-          ></textarea>
-        </div>
+          <!-- Scroll behaviour (loop vs once) -->
+          <div class="form-row">
+            <label for="scroll_behavior">Scroll behaviour</label>
+            <select id="scroll_behavior" name="scroll_behavior">
+              <option value="LOOP">LOOP — keep cycling through live messages</option>
+              <option value="ONCE">ONCE — each message plays through once, then expires</option>
+            </select>
+          </div>
 
-        <div class="form-row">
-          <label for="soft_banned_words">Soft banned words (comma-separated)</label>
-          <textarea
-            id="soft_banned_words"
-            name="soft_banned_words"
-            rows="2"
-            placeholder="e.g., word3, word4, another word"
-          ></textarea>
-        </div>
+          <!-- Message lifespan in seconds -->
+          <div class="form-row">
+            <label for="message_lifespan_seconds">Message lifespan (seconds)</label>
+            <input
+              type="number"
+              id="message_lifespan_seconds"
+              name="message_lifespan_seconds"
+              min="1"
+              max="3600"
+            />
+          </div>
 
-        <div class="form-actions">
-          <button id="save-settings-btn" type="button">
-            Save settings
-          </button>
-        </div>
-      </form>
+          <div class="form-actions">
+            <button id="save-settings-btn" type="button">
+              Save settings
+            </button>
+          </div>
+        </form>
+      </section>
     </section>
   </main>
 
   <!-- Main JS, loaded after DOM so getElementById works -->
-  <script src="app.js"></script>
+  <script src="app.js?v=5"></script>
+  <script>
+    // Prevent pinch-zoom and double-tap zoom on mobile
+    document.addEventListener("gesturestart", e => e.preventDefault());
+    document.addEventListener("dblclick", e => e.preventDefault());
+
+    let lastTouchEnd = 0;
+    document.addEventListener(
+      "touchend",
+      e => {
+        const now = Date.now();
+        if (now - lastTouchEnd <= 300) {
+          e.preventDefault();
+        }
+        lastTouchEnd = now;
+      },
+      { passive: false }
+    );
+  </script>
 </body>
 </html>
