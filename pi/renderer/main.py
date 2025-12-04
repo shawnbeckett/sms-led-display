@@ -257,6 +257,9 @@ def run():
         "last_step": 0.0,
     }
 
+    # Reusable offscreen canvas for idle/mute states
+    offscreen_canvas = matrix.CreateFrameCanvas()
+
     last_fetch_ts = 0
     cached_messages = []
     screen_muted = False
@@ -274,9 +277,8 @@ def run():
 
         if screen_muted:
             # Force a full blank frame (no ticker, no messages)
-            canvas = matrix.CreateFrameCanvas()
-            canvas.Clear()
-            canvas = matrix.SwapOnVSync(canvas)
+            offscreen_canvas.Clear()
+            offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
             time.sleep(0.2)
             continue
 
@@ -294,16 +296,15 @@ def run():
             # No live messages -> only show the small bottom ticker (no full-screen scroll)
             end_idle = time.time() + fallback_idle if fallback_idle > 0 else now
             while time.time() < end_idle:
-                canvas = matrix.CreateFrameCanvas()
-                canvas.Clear()
+                offscreen_canvas.Clear()
                 draw_and_step_ticker(
-                    canvas,
+                    offscreen_canvas,
                     settings,
                     ticker_state,
                     fonts["ticker_font"],
                     fonts["ticker_color"],
                 )
-                canvas = matrix.SwapOnVSync(canvas)
+                offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
                 time.sleep(settings.get("scroll_delay_sec", 0.03))
 
 
