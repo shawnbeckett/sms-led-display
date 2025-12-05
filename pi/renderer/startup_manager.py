@@ -6,15 +6,15 @@ Runs on boot (via systemd) and decides:
 
 1. If the Pi has working Wi-Fi + internet:
    - Log the SSID + status.
+   - Show "WiFi OK: <SSID>" briefly on the LED panel.
    - Start the main renderer (pi/renderer/main.py).
    - Then sleep forever so systemd keeps the process around.
 
 2. If the Pi does NOT have working Wi-Fi after a grace period:
    - Start the SMS-LED access point using wifi/ap_control.sh.
-   - Leave the local Wi-Fi config server running (it is its own systemd service).
+   - Show a persistent instruction on the LED panel:
+       "No WiFi. Connect to SMS-LED and go to http://192.168.4.1"
    - Sleep forever. The Wi-Fi config UI will write wpa_supplicant.conf and reboot.
-
-Later we can add LED output here (e.g., "WiFi OK: <SSID>" vs. "Connect to SMS-LED").
 """
 
 import os
@@ -22,6 +22,8 @@ import socket
 import subprocess
 import time
 from typing import Optional, Tuple
+
+from status_display import show_wifi_ok, show_wifi_setup_instructions
 
 # Paths on the Pi
 REPO_ROOT = "/home/pi/sms-led-display"
@@ -67,7 +69,7 @@ def get_current_ssid() -> Optional[str]:
 def has_internet_connectivity() -> bool:
     """
     Attempt a simple TCP connection to a well-known IP to verify internet.
-    We don't need HTTP/TLS, just that routing + DNS are essentially working.
+    We don't need HTTP/TLS, just that routing + IP are working.
     """
     try:
         with socket.create_connection(
@@ -118,7 +120,6 @@ def start_renderer() -> None:
         return
 
     log(f"Starting renderer: {RENDERER_MAIN}")
-    # We let the renderer run independently; this process simply stays alive.
     subprocess.Popen(
         [VENV_PYTHON, RENDERER_MAIN],
         cwd=RENDERER_DIR,
@@ -138,7 +139,6 @@ def start_access_point() -> None:
         return
 
     log("Starting SMS-LED access point (AP mode).")
-    # Service will run as root via systemd, so no sudo needed.
     try:
         subprocess.check_call(
             [AP_CONTROL, "start"],
@@ -160,12 +160,26 @@ def main() -> None:
             log(f"Wi-Fi OK. Connected to SSID: {ssid}")
         else:
             log("Wi-Fi OK. SSID unknown but internet is reachable.")
-        # Later we can show 'WiFi OK: <SSID>' on the LED panel here.
+
+        # Show Wi-Fi status briefly on the LED panel.
+        try:
+            show_wifi_ok(ssid)
+        except Exception as e:
+            log(f"Error in show_wifi_ok: {e}")
+
+        # Then launch the main renderer, which will take over the panel.
         start_renderer()
     else:
         log("No working internet detected; enabling SMS-LED hotspot.")
-        # Later we can show 'Connect to SMS-LED and visit http://192.168.4.1' on the LED panel here.
+
+        # Start AP mode first so the network is ready before we tell user.
         start_access_point()
+
+        # Show persistent setup instructions on the panel.
+        try:
+            show_wifi_setup_instructions()
+        except Exception as e:
+            log(f"Error in show_wifi_setup_instructions: {e}")
 
     # Keep this process alive so systemd treats the service as active.
     while True:
