@@ -221,7 +221,7 @@ def run():
     ticker_font = graphics.Font()
     ticker_font.LoadFont(settings.get("ticker_font_path", "/home/pi/rpi-rgb-led-matrix/fonts/tom-thumb.bdf"))
 
-    # Bright, high-contrast colors we’ll cycle through per message.
+    # Bright, high-contrast colors to assign per unique message.
     color_cycle = [
         graphics.Color(255, 0, 0),      # red
         graphics.Color(0, 255, 0),      # green
@@ -233,6 +233,7 @@ def run():
         graphics.Color(255, 255, 255),  # white
     ]
     color_index = 0
+    message_color_map = {}
 
     fonts = {
         "main_font": main_font,
@@ -274,19 +275,34 @@ def run():
     offscreen_canvas = matrix.CreateFrameCanvas()
 
     last_fetch_ts = 0
-    cached_messages = []
+    message_queue = []
+    queued_keys = set()
     screen_muted = False
     played_cache = set()
 
     while True:
         now = time.time()
 
-        # Refresh messages from backend based on poll interval
-        if now - last_fetch_ts >= poll_interval:
+        # Refresh messages from backend based on poll interval; always append, never drop queued items.
+        if not last_fetch_ts or now - last_fetch_ts >= poll_interval:
             live_data = fetch_live_messages(settings, live_url)
-            cached_messages = live_data.get("messages", [])
+            fetched = live_data.get("messages", []) or []
             screen_muted = live_data.get("screen_muted", False)
             last_fetch_ts = now
+
+            # Append new messages to the queue (dedupe against already queued; allow replays of played ones).
+            seen_keys = set()
+            for msg in fetched:
+                msg_id = msg.get("pk") or msg.get("message_id")
+                body = str(msg.get("body", "")).strip()
+                if not body:
+                    continue
+                key = msg_id or body
+                if key in seen_keys or key in queued_keys:
+                    continue
+                seen_keys.add(key)
+                message_queue.append(msg)
+                queued_keys.add(key)
 
         if screen_muted:
             # Force a full blank frame (no ticker, no messages)
@@ -295,23 +311,30 @@ def run():
             time.sleep(0.2)
             continue
 
-        if cached_messages:
-            # Scroll each approved message body in order
-            for msg in list(cached_messages):
-                msg_id = msg.get("pk") or msg.get("message_id")
-                if msg_id and msg_id not in played_cache:
-                    mark_message_played(settings, msg_id)
-                    played_cache.add(msg_id)
-                body = str(msg.get("body", "")).strip()
-                if body:
-                    # Cycle through bright colors for each new message.
-                    fonts["main_color"] = color_cycle[color_index % len(color_cycle)]
+        if message_queue:
+            # Take the next message in the queue (will be refilled on next poll with active items).
+            msg = message_queue.pop(0)
+            msg_id = msg.get("pk") or msg.get("message_id")
+            if msg_id and msg_id not in played_cache:
+                mark_message_played(settings, msg_id)
+                played_cache.add(msg_id)
+            body = str(msg.get("body", "")).strip()
+            if body:
+                # Stable color per unique message (by id or body).
+                key = msg_id or body
+                queued_keys.discard(key)
+                if key not in message_color_map:
+                    message_color_map[key] = color_cycle[color_index % len(color_cycle)]
                     color_index += 1
-                    scroll_text(matrix, body, settings, fonts, ticker_state)
+                fonts["main_color"] = message_color_map[key]
+                scroll_text(matrix, body, settings, fonts, ticker_state)
         else:
             # No live messages -> only show the small bottom ticker (no full-screen scroll)
             end_idle = time.time() + fallback_idle if fallback_idle > 0 else now
             while time.time() < end_idle:
+                # Break early to fetch if poll interval has passed while idling.
+                if time.time() - last_fetch_ts >= poll_interval:
+                    break
                 offscreen_canvas.Clear()
                 draw_and_step_ticker(
                     offscreen_canvas,
