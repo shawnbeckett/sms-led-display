@@ -221,6 +221,19 @@ def run():
     ticker_font = graphics.Font()
     ticker_font.LoadFont(settings.get("ticker_font_path", "/home/pi/rpi-rgb-led-matrix/fonts/tom-thumb.bdf"))
 
+    # Bright, high-contrast colors we’ll cycle through per message.
+    color_cycle = [
+        graphics.Color(255, 0, 0),      # red
+        graphics.Color(0, 255, 0),      # green
+        graphics.Color(0, 128, 255),    # blue-ish
+        graphics.Color(255, 255, 0),    # yellow
+        graphics.Color(255, 0, 255),    # magenta
+        graphics.Color(0, 255, 255),    # cyan
+        graphics.Color(255, 165, 0),    # orange
+        graphics.Color(255, 255, 255),  # white
+    ]
+    color_index = 0
+
     fonts = {
         "main_font": main_font,
         "main_color": graphics.Color(255, 255, 0),  # yellow
@@ -291,6 +304,9 @@ def run():
                     played_cache.add(msg_id)
                 body = str(msg.get("body", "")).strip()
                 if body:
+                    # Cycle through bright colors for each new message.
+                    fonts["main_color"] = color_cycle[color_index % len(color_cycle)]
+                    color_index += 1
                     scroll_text(matrix, body, settings, fonts, ticker_state)
         else:
             # No live messages -> only show the small bottom ticker (no full-screen scroll)

@@ -20,6 +20,7 @@ Runs on boot (via systemd) and decides:
 import os
 import socket
 import subprocess
+import sys
 import time
 from typing import Optional, Tuple
 
@@ -150,6 +151,11 @@ def start_access_point() -> None:
 
 
 def main() -> None:
+    # Log basic execution context for systemd/journalctl debugging.
+    log(f"startup_manager: cwd={os.getcwd()}")
+    log(f"startup_manager: file={__file__}")
+    log(f"startup_manager: argv={sys.argv}")
+
     # On boot, give the system a brief moment before we start checking.
     time.sleep(5)
 

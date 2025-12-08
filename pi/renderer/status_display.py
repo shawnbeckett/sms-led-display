@@ -14,7 +14,17 @@ from typing import Optional
 from rgbmatrix import RGBMatrix, RGBMatrixOptions, graphics
 
 
-def _create_matrix() -> RGBMatrix:
+FONT_CANDIDATES = [
+    "/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf",
+    "/usr/local/share/rgbmatrix/fonts/7x13.bdf",
+]
+
+
+def _log(msg: str) -> None:
+    print(f"[status_display] {msg}", flush=True)
+
+
+def _create_matrix() -> Optional[RGBMatrix]:
     """
     Create and return an RGBMatrix instance configured for:
       - 64x32 panel
@@ -27,23 +37,34 @@ def _create_matrix() -> RGBMatrix:
     options.cols = 64
     options.chain_length = 1
     options.parallel = 1
-    options.hardware_mapping = "adafruit-hat-pwm"  # For Adafruit RGB Matrix HAT
+    options.hardware_mapping = "adafruit-hat"
+    options.brightness = 70
     options.pwm_bits = 11
-    options.brightness = 60
-    options.gpio_slowdown = 4
+    options.drop_privileges = False
 
-    return RGBMatrix(options=options)
+    try:
+        matrix = RGBMatrix(options=options)
+        return matrix
+    except Exception as e:  # noqa: BLE001
+        _log(f"WARN: failed to init RGBMatrix: {e}")
+        return None
 
 
-def _load_font() -> graphics.Font:
+def _load_font() -> Optional[graphics.Font]:
     """
-    Load a BDF font. Path assumes rpi-rgb-led-matrix fonts are installed in the
-    typical location on the Pi. Adjust this path if your fonts live elsewhere.
+    Load a BDF font with fallback locations. Returns None if all attempts fail.
     """
     font = graphics.Font()
-    # This path may need tweaking if your fonts are in a different directory.
-    font.LoadFont("/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf")
-    return font
+    for path in FONT_CANDIDATES:
+        try:
+            font.LoadFont(path)
+            _log(f"Loaded font: {path}")
+            return font
+        except Exception as e:  # noqa: BLE001
+            _log(f"Font load failed at {path}: {e}")
+
+    _log("WARN: could not load 7x13 font from any known path; skipping text render")
+    return None
 
 
 def _scroll_message(message: str, loops: int = 1, color=None, speed_sec: float = 0.03) -> None:
@@ -58,8 +79,14 @@ def _scroll_message(message: str, loops: int = 1, color=None, speed_sec: float =
         speed_sec: Delay between scroll steps.
     """
     matrix = _create_matrix()
+    if matrix is None:
+        return
+
     offscreen_canvas = matrix.CreateFrameCanvas()
     font = _load_font()
+    if font is None:
+        return
+
     if color is None:
         color = graphics.Color(255, 255, 255)
 
@@ -91,13 +118,57 @@ def _scroll_message(message: str, loops: int = 1, color=None, speed_sec: float =
                 break
             x = x_start
 
-        offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
+        try:
+            offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
+        except Exception as e:  # noqa: BLE001
+            _log(f"WARN: SwapOnVSync failed: {e}")
+            break
         time.sleep(speed_sec)
+
+
+def _display_message_static(message: str, duration_sec: float, color=None) -> None:
+    """
+    Display a single-line message without scrolling for a fixed duration.
+    Clears the canvas afterward.
+    """
+    matrix = _create_matrix()
+    if matrix is None:
+        return
+
+    offscreen_canvas = matrix.CreateFrameCanvas()
+    font = _load_font()
+    if font is None:
+        return
+
+    if color is None:
+        color = graphics.Color(255, 255, 255)
+
+    text_y = 20
+    text_width = graphics.DrawText(offscreen_canvas, font, 0, text_y, color, message)
+
+    # Center horizontally if room allows.
+    x = max(0, (offscreen_canvas.width - text_width) // 2)
+    offscreen_canvas.Clear()
+    graphics.DrawText(offscreen_canvas, font, x, text_y, color, message)
+    try:
+        offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
+    except Exception as e:  # noqa: BLE001
+        _log(f"WARN: SwapOnVSync failed for static display: {e}")
+        return
+
+    time.sleep(duration_sec)
+
+    # Clear after showing.
+    offscreen_canvas.Clear()
+    try:
+        matrix.SwapOnVSync(offscreen_canvas)
+    except Exception as e:  # noqa: BLE001
+        _log(f"WARN: SwapOnVSync failed during clear: {e}")
 
 
 def show_wifi_ok(ssid: Optional[str]) -> None:
     """
-    Show a brief "WiFi OK: <SSID>" message on the panel, then return.
+    Show a brief "WiFi OK: <SSID>" message on the panel, scrolling once.
 
     This is intended to be called by startup_manager.py right before
     it launches the main renderer.
@@ -107,8 +178,8 @@ def show_wifi_ok(ssid: Optional[str]) -> None:
     else:
         msg = "WiFi OK"
 
-    # Scroll the message a couple of times; adjust loops/duration as needed.
-    _scroll_message(msg, loops=2, color=graphics.Color(0, 255, 0), speed_sec=0.04)
+    # Scroll once across the panel; adjust duration as needed.
+    _scroll_message(msg, loops=1, color=graphics.Color(0, 255, 0), speed_sec=0.04)
 
 
 def show_wifi_setup_instructions() -> None:
