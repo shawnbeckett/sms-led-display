@@ -243,9 +243,10 @@ def run():
     }
 
     poll_interval = settings.get("poll_interval_sec", 5)
-    fallback_message = settings.get("fallback_message", "TXT 647-930-4995")
+    fallback_message = settings.get("fallback_message", "^^TXT: 647-930-4995")
     fallback_idle = settings.get("fallback_idle_seconds", 5)
     ticker_text = settings.get("ticker_text", fallback_message)
+    # No extra adornment; render ticker text as-is.
 
     live_url = build_live_messages_url(settings)
     print("[Pi] Loaded settings from:", SETTINGS_FILE)
