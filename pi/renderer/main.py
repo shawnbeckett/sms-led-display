@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import time
+import threading
 from pathlib import Path
 
 import requests
@@ -84,7 +85,7 @@ def get_message_id(msg):
 
 
 # ---------------------------------------------------------------------------
-# Backend polling
+# Backend polling (HTTP helpers)
 # ---------------------------------------------------------------------------
 
 def fetch_live_messages(settings, url):
@@ -119,22 +120,61 @@ def fetch_live_messages(settings, url):
 def mark_message_played(settings, message_id):
     """
     Notify the backend that a message has been played so UI can start countdowns.
+
+    This implementation is fully async: it spawns a background thread
+    so the render loop is never blocked by HTTP.
     """
     if not message_id:
         return
 
-    base = (settings.get("api_base_url") or "").rstrip("/")
-    played_url = base + "/messages/played"
-    try:
-        resp = requests.post(
-            played_url,
-            json={"message_id": message_id},
-            timeout=3,
-        )
-        if resp.status_code != 200:
-            print(f"[Pi] mark_played failed {resp.status_code}: {resp.text}")
-    except Exception as e:
-        print(f"[Pi] Error marking played for {message_id}: {e}")
+    def worker():
+        try:
+            base = (settings.get("api_base_url") or "").rstrip("/")
+            played_url = base + "/messages/played"
+            resp = requests.post(
+                played_url,
+                json={"message_id": message_id},
+                timeout=1,  # keep this short; it's fire-and-forget
+            )
+            if resp.status_code != 200:
+                print(f"[Pi] mark_played failed {resp.status_code}: {resp.text}")
+        except Exception as e:
+            print(f"[Pi] Error marking played for {message_id}: {e}")
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+
+
+# ---------------------------------------------------------------------------
+# Background polling thread
+# ---------------------------------------------------------------------------
+
+def start_live_polling_thread(settings, live_url, poll_interval, shared_state):
+    """
+    Start a background thread which periodically polls /messages/live and
+    updates shared_state with the latest messages + screen_muted status.
+
+    shared_state is a dict with keys:
+      - "messages": latest raw list from the backend
+      - "screen_muted": bool
+      - "last_update": monotonic timestamp of last successful poll
+    """
+
+    def poller():
+        while True:
+            data = fetch_live_messages(settings, live_url)
+            now = time.time()
+
+            # Replace references instead of mutating in-place to avoid
+            # partial reads in the main thread.
+            shared_state["messages"] = data.get("messages", [])
+            shared_state["screen_muted"] = data.get("screen_muted", False)
+            shared_state["last_update"] = now
+
+            time.sleep(poll_interval)
+
+    t = threading.Thread(target=poller, daemon=True)
+    t.start()
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +245,8 @@ def scroll_text(matrix, text, settings, fonts, ticker_state):
     while pos_x + text_width > 0:
         offscreen_canvas.Clear()
         graphics.DrawText(offscreen_canvas, font, pos_x, text_y, color, text)
+
+        # Keep ticker moving while main text scrolls
         draw_and_step_ticker(
             offscreen_canvas,
             settings,
@@ -212,6 +254,7 @@ def scroll_text(matrix, text, settings, fonts, ticker_state):
             fonts["ticker_font"],
             fonts["ticker_color"],
         )
+
         pos_x -= 1
         time.sleep(scroll_delay)
         offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
@@ -316,6 +359,16 @@ def run():
     print("[Pi] Using live messages URL:", live_url)
     print("[Pi] Poll interval (sec):", poll_interval)
 
+    # Shared state for polling thread
+    shared_state = {
+        "messages": [],
+        "screen_muted": False,
+        "last_update": 0.0,
+    }
+
+    # Start background polling
+    start_live_polling_thread(settings, live_url, poll_interval, shared_state)
+
     # Ticker state: start from the right edge
     temp_canvas = matrix.CreateFrameCanvas()
     ticker_width = graphics.DrawText(
@@ -338,35 +391,31 @@ def run():
     # Reusable offscreen canvas for idle/mute states
     offscreen_canvas = matrix.CreateFrameCanvas()
 
-    last_fetch_ts = 0.0
-    screen_muted = False
-
     # New stable, rotating queue
     active_messages = []   # ordered list of currently live messages
     active_index = 0       # index into active_messages
     played_cache = set()   # IDs we've notified the backend about at least once
 
+    last_applied_update = 0.0
+
     while True:
-        now = time.time()
+        # Snapshot current polling state
+        messages = shared_state["messages"]
+        screen_muted = shared_state["screen_muted"]
+        last_update = shared_state["last_update"]
 
-        # Periodically refresh the "live" list and rebuild the active queue.
-        if not last_fetch_ts or now - last_fetch_ts >= poll_interval:
-            live_data = fetch_live_messages(settings, live_url)
-            fetched = live_data.get("messages", []) or []
-            screen_muted = live_data.get("screen_muted", False)
-            last_fetch_ts = now
-
-            # Rebuild active_messages while preserving order and appending new.
+        # If polling thread has new data, rebuild the active queue.
+        if last_update != last_applied_update:
             prev_len = len(active_messages)
-            active_messages = rebuild_active_messages(active_messages, fetched)
+            active_messages = rebuild_active_messages(active_messages, messages)
 
-            # Keep active_index pointing at the same logical message when possible.
             if active_messages:
-                # If index was out of bounds (e.g., all messages cleared), clamp.
                 if active_index >= len(active_messages):
                     active_index = 0
             else:
                 active_index = 0
+
+            last_applied_update = last_update
 
             print(
                 f"[Pi] Active queue size after rebuild: {len(active_messages)} "
@@ -387,6 +436,7 @@ def run():
             body = str(msg.get("body", "")).strip()
 
             if msg_id and msg_id not in played_cache:
+                # Async, non-blocking
                 mark_message_played(settings, msg_id)
                 played_cache.add(msg_id)
 
@@ -397,6 +447,8 @@ def run():
                     message_color_map[key] = color_cycle[color_index % len(color_cycle)]
                     color_index += 1
                 fonts["main_color"] = message_color_map[key]
+
+                # Scroll this message (ticker keeps moving inside scroll_text)
                 scroll_text(matrix, body, settings, fonts, ticker_state)
 
             # Advance to the next message in the rotation.
@@ -407,11 +459,12 @@ def run():
 
         else:
             # No live messages -> only show the small bottom ticker (no full-screen scroll)
-            end_idle = time.time() + fallback_idle if fallback_idle > 0 else now
+            end_idle = time.time() + fallback_idle if fallback_idle > 0 else time.time()
             while time.time() < end_idle:
-                # Break early to fetch if poll interval has passed while idling.
-                if time.time() - last_fetch_ts >= poll_interval:
+                # Break early if new data has arrived
+                if shared_state["last_update"] != last_applied_update:
                     break
+
                 offscreen_canvas.Clear()
                 draw_and_step_ticker(
                     offscreen_canvas,
