@@ -34,9 +34,9 @@ def load_settings():
     data.setdefault("hardware_mapping", "adafruit-hat")
     data.setdefault("brightness", 70)
     data.setdefault("font_path", "/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf")
-    data.setdefault("fallback_message", "^^ TXT: 647-930-4995 ^^")
+    data.setdefault("fallback_message", "^^TXT: 647-930-4995^^")
     data.setdefault("fallback_idle_seconds", 5)
-    data.setdefault("ticker_text", data.get("fallback_message", "^^ TXT: 647-930-4995 ^^"))
+    data.setdefault("ticker_text", data.get("fallback_message", "^^TXT: 647-930-4995^^"))
     data.setdefault("ticker_font_path", "/home/pi/rpi-rgb-led-matrix/fonts/tom-thumb.bdf")
     data.setdefault("ticker_scroll_delay_sec", 0.07)
     data.setdefault("ticker_gap_px", 10)
@@ -243,7 +243,7 @@ def run():
     }
 
     poll_interval = settings.get("poll_interval_sec", 5)
-    fallback_message = settings.get("fallback_message", "^^ TXT: 647-930-4995 ^^")
+    fallback_message = settings.get("fallback_message", "^^TXT: 647-930-4995^^")
     fallback_idle = settings.get("fallback_idle_seconds", 5)
     ticker_text = settings.get("ticker_text", fallback_message)
     # No extra adornment; render ticker text as-is.
