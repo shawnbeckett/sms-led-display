@@ -9,7 +9,7 @@ Used by startup_manager.py to:
 """
 
 import time
-from typing import Optional
+from typing import List, Optional
 
 from rgbmatrix import RGBMatrix, RGBMatrixOptions, graphics
 
@@ -17,6 +17,12 @@ from rgbmatrix import RGBMatrix, RGBMatrixOptions, graphics
 FONT_CANDIDATES = [
     "/home/pi/rpi-rgb-led-matrix/fonts/7x13.bdf",
     "/usr/local/share/rgbmatrix/fonts/7x13.bdf",
+]
+SMALL_FONT_CANDIDATES = [
+    "/home/pi/rpi-rgb-led-matrix/fonts/5x8.bdf",
+    "/usr/local/share/rgbmatrix/fonts/5x8.bdf",
+    "/home/pi/rpi-rgb-led-matrix/fonts/tom-thumb.bdf",
+    "/usr/local/share/rgbmatrix/fonts/tom-thumb.bdf",
 ]
 
 
@@ -50,12 +56,13 @@ def _create_matrix() -> Optional[RGBMatrix]:
         return None
 
 
-def _load_font() -> Optional[graphics.Font]:
+def _load_font(font_candidates: Optional[List[str]] = None) -> Optional[graphics.Font]:
     """
     Load a BDF font with fallback locations. Returns None if all attempts fail.
     """
+    candidates = font_candidates or FONT_CANDIDATES
     font = graphics.Font()
-    for path in FONT_CANDIDATES:
+    for path in candidates:
         try:
             font.LoadFont(path)
             _log(f"Loaded font: {path}")
@@ -63,11 +70,18 @@ def _load_font() -> Optional[graphics.Font]:
         except Exception as e:  # noqa: BLE001
             _log(f"Font load failed at {path}: {e}")
 
-    _log("WARN: could not load 7x13 font from any known path; skipping text render")
+    _log("WARN: could not load font from any known path; skipping text render")
     return None
 
 
-def _scroll_message(message: str, loops: int = 1, color=None, speed_sec: float = 0.03) -> None:
+def _scroll_message(
+    message: str,
+    loops: int = 1,
+    color=None,
+    speed_sec: float = 0.03,
+    font_candidates: Optional[List[str]] = None,
+    text_y: Optional[int] = None,
+) -> None:
     """
     Scroll a single-line message across the panel.
 
@@ -77,13 +91,14 @@ def _scroll_message(message: str, loops: int = 1, color=None, speed_sec: float =
                If loops <= 0, scrolls indefinitely.
         color: Optional graphics.Color; defaults to white.
         speed_sec: Delay between scroll steps.
+        font_candidates: Optional list of font file paths (BDF) to try in order.
     """
     matrix = _create_matrix()
     if matrix is None:
         return
 
     offscreen_canvas = matrix.CreateFrameCanvas()
-    font = _load_font()
+    font = _load_font(font_candidates)
     if font is None:
         return
 
@@ -91,7 +106,7 @@ def _scroll_message(message: str, loops: int = 1, color=None, speed_sec: float =
         color = graphics.Color(255, 255, 255)
 
     # Y position for baseline of text; tweak if you change font.
-    text_y = 20
+    text_y = 20 if text_y is None else text_y
 
     # Measure text width.
     text_width = graphics.DrawText(offscreen_canvas, font, 0, text_y, color, message)
@@ -168,18 +183,25 @@ def _display_message_static(message: str, duration_sec: float, color=None) -> No
 
 def show_wifi_ok(ssid: Optional[str]) -> None:
     """
-    Show a brief "WiFi OK: <SSID>" message on the panel, scrolling once.
+    Show a brief "WIFI OK: <SSID>" message on the panel, scrolling once.
 
     This is intended to be called by startup_manager.py right before
     it launches the main renderer.
     """
     if ssid:
-        msg = f"WiFi OK: {ssid}"
+        msg = f"WIFI OK: {ssid}"
     else:
-        msg = "WiFi OK"
+        msg = "WIFI OK"
 
     # Scroll once across the panel; adjust duration as needed.
-    _scroll_message(msg, loops=1, color=graphics.Color(0, 255, 0), speed_sec=0.04)
+    _scroll_message(
+        msg,
+        loops=1,
+        color=graphics.Color(0, 255, 0),
+        speed_sec=0.02,
+        font_candidates=SMALL_FONT_CANDIDATES + FONT_CANDIDATES,
+        text_y=14,
+    )
 
 
 def show_wifi_setup_instructions() -> None:
