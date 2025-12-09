@@ -73,6 +73,16 @@ def build_live_messages_url(settings):
     return url
 
 
+def get_message_id(msg):
+    """
+    Derive a stable ID for a message.
+
+    Prefer backend IDs, fall back to body text if needed.
+    """
+    body = str(msg.get("body", "")).strip()
+    return msg.get("pk") or msg.get("message_id") or body
+
+
 # ---------------------------------------------------------------------------
 # Backend polling
 # ---------------------------------------------------------------------------
@@ -208,6 +218,60 @@ def scroll_text(matrix, text, settings, fonts, ticker_state):
 
 
 # ---------------------------------------------------------------------------
+# Active queue management
+# ---------------------------------------------------------------------------
+
+def rebuild_active_messages(active_messages, fetched_messages):
+    """
+    Given the current in-memory active_messages list and a fresh list of
+    messages from the backend, return a new active_messages list that:
+
+      - Keeps the existing order for messages that are still live; and
+      - Appends truly new messages to the end; and
+      - Drops messages that are no longer live.
+
+    This is the key to having a stable queue where new items join the
+    tail without scrambling the current order.
+    """
+    # Clean and de-duplicate fetched messages first
+    cleaned = []
+    fetched_ids = []
+    for msg in fetched_messages:
+        body = str(msg.get("body", "")).strip()
+        if not body:
+            continue
+        mid = get_message_id(msg)
+        if not mid:
+            continue
+        if mid in fetched_ids:
+            continue
+        fetched_ids.append(mid)
+        cleaned.append(msg)
+
+    # Preserve existing order for messages that are still live
+    new_active = []
+    used_ids = set()
+
+    # Map ID -> freshest version of the message from the backend
+    id_to_msg = {get_message_id(msg): msg for msg in cleaned}
+
+    for old_msg in active_messages:
+        oid = get_message_id(old_msg)
+        if oid in id_to_msg and oid not in used_ids:
+            new_active.append(id_to_msg[oid])
+            used_ids.add(oid)
+
+    # Append any truly new messages (that weren't already in active_messages)
+    for msg in cleaned:
+        mid = get_message_id(msg)
+        if mid not in used_ids:
+            new_active.append(msg)
+            used_ids.add(mid)
+
+    return new_active
+
+
+# ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
@@ -237,7 +301,7 @@ def run():
 
     fonts = {
         "main_font": main_font,
-        "main_color": graphics.Color(255, 255, 0),  # yellow
+        "main_color": graphics.Color(255, 255, 0),  # default yellow
         "ticker_font": ticker_font,
         "ticker_color": graphics.Color(200, 200, 200),
     }
@@ -246,7 +310,6 @@ def run():
     fallback_message = settings.get("fallback_message", "^^TXT: 647-930-4995^^")
     fallback_idle = settings.get("fallback_idle_seconds", 5)
     ticker_text = settings.get("ticker_text", fallback_message)
-    # No extra adornment; render ticker text as-is.
 
     live_url = build_live_messages_url(settings)
     print("[Pi] Loaded settings from:", SETTINGS_FILE)
@@ -275,35 +338,40 @@ def run():
     # Reusable offscreen canvas for idle/mute states
     offscreen_canvas = matrix.CreateFrameCanvas()
 
-    last_fetch_ts = 0
-    message_queue = []
-    queued_keys = set()
+    last_fetch_ts = 0.0
     screen_muted = False
-    played_cache = set()
+
+    # New stable, rotating queue
+    active_messages = []   # ordered list of currently live messages
+    active_index = 0       # index into active_messages
+    played_cache = set()   # IDs we've notified the backend about at least once
 
     while True:
         now = time.time()
 
-        # Refresh messages from backend based on poll interval; always append, never drop queued items.
+        # Periodically refresh the "live" list and rebuild the active queue.
         if not last_fetch_ts or now - last_fetch_ts >= poll_interval:
             live_data = fetch_live_messages(settings, live_url)
             fetched = live_data.get("messages", []) or []
             screen_muted = live_data.get("screen_muted", False)
             last_fetch_ts = now
 
-            # Append new messages to the queue (dedupe against already queued; allow replays of played ones).
-            seen_keys = set()
-            for msg in fetched:
-                msg_id = msg.get("pk") or msg.get("message_id")
-                body = str(msg.get("body", "")).strip()
-                if not body:
-                    continue
-                key = msg_id or body
-                if key in seen_keys or key in queued_keys:
-                    continue
-                seen_keys.add(key)
-                message_queue.append(msg)
-                queued_keys.add(key)
+            # Rebuild active_messages while preserving order and appending new.
+            prev_len = len(active_messages)
+            active_messages = rebuild_active_messages(active_messages, fetched)
+
+            # Keep active_index pointing at the same logical message when possible.
+            if active_messages:
+                # If index was out of bounds (e.g., all messages cleared), clamp.
+                if active_index >= len(active_messages):
+                    active_index = 0
+            else:
+                active_index = 0
+
+            print(
+                f"[Pi] Active queue size after rebuild: {len(active_messages)} "
+                f"(was {prev_len})"
+            )
 
         if screen_muted:
             # Force a full blank frame (no ticker, no messages)
@@ -312,23 +380,31 @@ def run():
             time.sleep(0.2)
             continue
 
-        if message_queue:
-            # Take the next message in the queue (will be refilled on next poll with active items).
-            msg = message_queue.pop(0)
-            msg_id = msg.get("pk") or msg.get("message_id")
+        if active_messages:
+            # Take the next message in the stable queue.
+            msg = active_messages[active_index]
+            msg_id = get_message_id(msg)
+            body = str(msg.get("body", "")).strip()
+
             if msg_id and msg_id not in played_cache:
                 mark_message_played(settings, msg_id)
                 played_cache.add(msg_id)
-            body = str(msg.get("body", "")).strip()
+
             if body:
                 # Stable color per unique message (by id or body).
                 key = msg_id or body
-                queued_keys.discard(key)
                 if key not in message_color_map:
                     message_color_map[key] = color_cycle[color_index % len(color_cycle)]
                     color_index += 1
                 fonts["main_color"] = message_color_map[key]
                 scroll_text(matrix, body, settings, fonts, ticker_state)
+
+            # Advance to the next message in the rotation.
+            if active_messages:
+                active_index = (active_index + 1) % len(active_messages)
+            else:
+                active_index = 0
+
         else:
             # No live messages -> only show the small bottom ticker (no full-screen scroll)
             end_idle = time.time() + fallback_idle if fallback_idle > 0 else now
