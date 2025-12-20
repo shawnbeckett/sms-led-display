@@ -321,9 +321,9 @@ def scroll_messages_with_overlap(
 
         update_pending = shared_state["last_update"] != last_applied_update
 
-        # Add a new message only when no update is pending (so we can drain
-        # the current sprites cleanly before rebuilding the queue).
-        if not update_pending and ((not sprites) or (sprites[-1]["pos_x"] + sprites[-1]["width"] + gap_px <= width)):
+        # Always add the next message when there's room; if an update is pending,
+        # we keep adding until the current batch drains, then break.
+        if (not sprites) or (sprites[-1]["pos_x"] + sprites[-1]["width"] + gap_px <= width):
             msg = messages[next_index % len(messages)]
             msg_id = get_message_id(msg)
             body = str(msg.get("body", "")).strip()
@@ -377,7 +377,7 @@ def scroll_messages_with_overlap(
         offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
         time.sleep(scroll_delay)
 
-        # If new data arrived, stop adding and break once current sprites have exited.
+        # If new data arrived, stop once the current sprites have exited.
         if update_pending and not sprites:
             break
 
