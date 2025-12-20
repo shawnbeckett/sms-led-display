@@ -41,6 +41,7 @@ def load_settings():
     data.setdefault("ticker_font_path", "/home/pi/rpi-rgb-led-matrix/fonts/tom-thumb.bdf")
     data.setdefault("ticker_scroll_delay_sec", 0.07)
     data.setdefault("ticker_gap_px", 10)
+    data.setdefault("message_gap_px", 30)
 
     return data
 
@@ -272,6 +273,110 @@ def scroll_text(matrix, text, settings, fonts, ticker_state):
         offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
 
 
+def scroll_messages_with_overlap(
+    matrix,
+    messages,
+    start_index,
+    settings,
+    fonts,
+    ticker_state,
+    message_color_map,
+    color_cycle,
+    played_cache,
+    shared_state,
+    last_applied_update,
+):
+    """
+    Continuously scroll messages, allowing a new message to enter while the
+    previous is still on-screen. Returns the next start_index to use when
+    this call exits (e.g., because new data arrived).
+    """
+    if not messages:
+        return start_index
+
+    scroll_delay = settings.get("scroll_delay_sec", 0.03)
+    gap_px = settings.get("message_gap_px", 30)
+
+    offscreen_canvas = matrix.CreateFrameCanvas()
+    width = offscreen_canvas.width
+    height = offscreen_canvas.height
+    text_y = height // 2 + 4
+
+    # Each entry: {"body": str, "pos_x": int, "width": int, "color": Color, "id": str}
+    sprites = []
+    next_index = start_index
+    color_index = 0
+
+    def assign_color(key):
+        nonlocal color_index
+        if key not in message_color_map:
+            message_color_map[key] = color_cycle[color_index % len(color_cycle)]
+            color_index += 1
+        return message_color_map[key]
+
+    while True:
+        # Break out if new data arrived or screen was muted mid-scroll.
+        if shared_state["last_update"] != last_applied_update or shared_state.get("screen_muted"):
+            break
+
+        # Add a new message when there is enough space after the last sprite.
+        if (not sprites) or (sprites[-1]["pos_x"] + sprites[-1]["width"] + gap_px <= width):
+            msg = messages[next_index % len(messages)]
+            msg_id = get_message_id(msg)
+            body = str(msg.get("body", "")).strip()
+            if body:
+                color = assign_color(msg_id or body)
+                text_width = graphics.DrawText(offscreen_canvas, fonts["main_font"], 0, text_y, color, body)
+                offscreen_canvas.Clear()  # undo measurement draw
+
+                if msg_id and msg_id not in played_cache:
+                    mark_message_played(settings, msg_id)
+                    played_cache.add(msg_id)
+
+                sprites.append(
+                    {
+                        "body": body,
+                        "pos_x": width,
+                        "width": text_width,
+                        "color": color,
+                        "id": msg_id or body,
+                    }
+                )
+                next_index += 1
+
+        offscreen_canvas.Clear()
+
+        # Draw sprites and advance them.
+        still_on_screen = []
+        for sprite in sprites:
+            graphics.DrawText(
+                offscreen_canvas,
+                fonts["main_font"],
+                sprite["pos_x"],
+                text_y,
+                sprite["color"],
+                sprite["body"],
+            )
+            sprite["pos_x"] -= 1
+            if sprite["pos_x"] + sprite["width"] > 0:
+                still_on_screen.append(sprite)
+        sprites = still_on_screen
+
+        # Keep ticker moving
+        draw_and_step_ticker(
+            offscreen_canvas,
+            settings,
+            ticker_state,
+            fonts["ticker_font"],
+            fonts["ticker_color"],
+        )
+
+        offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
+        time.sleep(scroll_delay)
+
+    return next_index % len(messages) if messages else 0
+
+
 # ---------------------------------------------------------------------------
 # Active queue management
 # ---------------------------------------------------------------------------
@@ -351,7 +456,6 @@ def run():
         graphics.Color(255, 165, 0),    # orange
         graphics.Color(255, 255, 255),  # white
     ]
-    color_index = 0
     message_color_map = {}
 
     fonts = {
@@ -442,32 +546,20 @@ def run():
             continue
 
         if active_messages:
-            # Take the next message in the stable queue.
-            msg = active_messages[active_index]
-            msg_id = get_message_id(msg)
-            body = str(msg.get("body", "")).strip()
-
-            if msg_id and msg_id not in played_cache:
-                # Async, non-blocking
-                mark_message_played(settings, msg_id)
-                played_cache.add(msg_id)
-
-            if body:
-                # Stable color per unique message (by id or body).
-                key = msg_id or body
-                if key not in message_color_map:
-                    message_color_map[key] = color_cycle[color_index % len(color_cycle)]
-                    color_index += 1
-                fonts["main_color"] = message_color_map[key]
-
-                # Scroll this message (ticker keeps moving inside scroll_text)
-                scroll_text(matrix, body, settings, fonts, ticker_state)
-
-            # Advance to the next message in the rotation.
-            if active_messages:
-                active_index = (active_index + 1) % len(active_messages)
-            else:
-                active_index = 0
+            # Scroll messages continuously with overlap, starting from active_index.
+            active_index = scroll_messages_with_overlap(
+                matrix,
+                active_messages,
+                active_index,
+                settings,
+                fonts,
+                ticker_state,
+                message_color_map,
+                color_cycle,
+                played_cache,
+                shared_state,
+                last_applied_update,
+            )
 
         else:
             # No live messages -> only show the small bottom ticker (no full-screen scroll)
