@@ -203,9 +203,10 @@ def draw_and_step_ticker(canvas, settings, ticker_state, ticker_font, ticker_col
 
     gap = settings.get("ticker_gap_px", 10)
 
-    # Wrap when the first instance is fully off screen
+    # Wrap when the first instance is fully off screen by resetting to the
+    # far right edge (covers long chains without leaving the right panels blank).
     if ticker_state["pos_x"] + width < 0:
-        ticker_state["pos_x"] += width + gap
+        ticker_state["pos_x"] = canvas.width
 
     text_y = canvas.height - 1  # bottom row baseline for the tiny font
     x1 = ticker_state["pos_x"]
