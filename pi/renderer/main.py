@@ -315,12 +315,15 @@ def scroll_messages_with_overlap(
         return message_color_map[key]
 
     while True:
-        # Break out if new data arrived or screen was muted mid-scroll.
-        if shared_state["last_update"] != last_applied_update or shared_state.get("screen_muted"):
+        # If screen was muted mid-scroll, exit immediately so the caller can blank.
+        if shared_state.get("screen_muted"):
             break
 
-        # Add a new message when there is enough space after the last sprite.
-        if (not sprites) or (sprites[-1]["pos_x"] + sprites[-1]["width"] + gap_px <= width):
+        update_pending = shared_state["last_update"] != last_applied_update
+
+        # Add a new message only when no update is pending (so we can drain
+        # the current sprites cleanly before rebuilding the queue).
+        if not update_pending and ((not sprites) or (sprites[-1]["pos_x"] + sprites[-1]["width"] + gap_px <= width)):
             msg = messages[next_index % len(messages)]
             msg_id = get_message_id(msg)
             body = str(msg.get("body", "")).strip()
@@ -373,6 +376,10 @@ def scroll_messages_with_overlap(
 
         offscreen_canvas = matrix.SwapOnVSync(offscreen_canvas)
         time.sleep(scroll_delay)
+
+        # If new data arrived, stop adding and break once current sprites have exited.
+        if update_pending and not sprites:
+            break
 
     return next_index % len(messages) if messages else 0
 
