@@ -7,7 +7,7 @@
 
   "panel_rows": 32,
   "panel_cols": 64,
-  "chain_length": 1,
+  "chain_length": 5,
   "parallel": 1,
   "hardware_mapping": "adafruit-hat",
   "brightness": 70,
